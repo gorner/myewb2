@@ -4,25 +4,42 @@
 {% load extra_tagging_tags %}
 {% load group_tags %}
 
-<div class="topic clearfix">
-    <div class="task-meta">
-        <div class="avatar">{% avatar topic.creator 40 %}</div>
-        <div class="details"><a href="{{ topic.creator.get_profile.get_absolute_url }}">{{ topic.creator }}</a></div>
-        <div class="created">{{ topic.created|date }}</div>
+<div class="topic clearfix" style="border: solid 1px black; border-bottom: dashed 1px black;">
+    <div class="topic-header" style="background-color: blue; color: white; font-size: 14pt; font-weight: bold; text-decoration: none; padding: 4px 8px;">
+        <div style="float: right; font-size: 10px; font-weight: normal; padding-top: 3px;">
+            {% get_comment_count for topic as comment_count %}
+            {% if comment_count %}
+                <div class="comment-stats">
+                    {# FIXME: i18n? #}
+                    {{ comment_count }} repl{{ comment_count|pluralize:"y,ies" }}
+                </div>
+            {% endif %}
+        </div>
+        <a class="topic-header-link" style="color: white; font-size: 14pt; font-weight: bold; text-decoration: none;" href="{{ topic.get_absolute_url }}">{{ topic.title }}</a>
     </div>
-    <div class="bulk">
-        {% if not group %}<div class="topic_group"><a href="{% groupurl topic_list topic.group %}">{{topic.group}}</a></div>{% endif %}
-        <h2><a href="{{ topic.get_absolute_url }}">{{ topic.title }}</a></h2>
-        <div class="body">{{ topic.body|safe }}</div>
-        {% get_comment_count for topic as comment_count %}
-        {% if comment_count %}
-            <div class="comment_stats">
-                {{ comment_count }} comment{{ comment_count|pluralize }}
-                {% blocktrans with topic.modified|date as topic_modified %}
-                (most recent: {{ topic_modified }})
-                {% endblocktrans %}
-            </div>
-        {% endif %}
+    <div class="topic-subheader" style="background-color: #C2D1FF; height: 36px; padding-top: 6px;">
+        <div class="topic-subheader-left" style="float: left; height: 36px; width: 49%; margin-left: 8px;">
+            {% trans "By" %} <a href="{{ topic.creator.get_profile.get_absolute_url }}">{{ topic.creator }}</a><br/>
+            {{ topic.created|date }}
+        </div>
+        <div class="topic-subheader-right" style="text-align: right; float: right; height: 36px; width: 49%; margin-right: 8px;">
+            {% if not group %}<div class="topic_group"><a href="{% groupurl topic_list topic.group %}">{{topic.group}}</a></div>{% endif %}
+        </div>
+    </div>
+    <div class="topic-body" style="padding: 12px; padding-top: 0px;">
+        <div class="avatar" style="float: right;">{% avatar topic.creator 60 %}</div>
+        {{ topic.body|safe }}
+    </div>
+    
+    <div class="topic-footer" style="text-align: right; margin-right: 8px;">        
         <p>{% show_tags_for topic %}</p>
+        {% if comment_count %}
+        <div class="comment-last">
+            {% blocktrans with topic.modified|date as topic_modified %}
+            Most recent comment: {{ topic_modified }}
+            {% endblocktrans %}
+        </div>
+        {% endif %}
+        <a href="{{ topic.get_absolute_url }}">{% trans "read more or reply" %} »</a>
     </div>
 </div>
