@@ -3,14 +3,22 @@
 {% load group_tags %}
 
 <h1>{{ group }}</h1>    
-<h2>{{ member.user.visible_name }}</h2>
+<h2>{{ other_user.visible_name }}</h2>
 
 <p>
-Are you sure you want to leave {{ group }}?
+{% ifequal user other_user %}
+    {% blocktrans %}Are you sure you want to leave {{ group }}?{% endblocktrans %}
+{% else %}
+    {% blocktrans with other_user.visible_name as visname %}Are you sure you want to remove {{ visname }} from {{ group }}?{% endblocktrans %}
+{% endifequal %}
 </p>
 
 <form class="uniForm" id="delete-member" method="POST" action="">
     <fieldset class="inlineLabels">
-            <input type="submit" value="{% trans "Leave group" %}"/>
+            {% ifequal user other_user %}
+                <input type="submit" value="{% trans "Leave group" %}"/>
+            {% else %}
+                <input type="submit" value="{% trans "Remove member" %}"/>
+            {% endifequal %}
     </fieldset>
 </form>
