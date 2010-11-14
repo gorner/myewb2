@@ -1,5 +1,6 @@
 {% extends 'events/base.html' %}
 {% load events_tags %} 
+{% load base_groups_tags %}
 
 {% block extra_head %}
 
@@ -26,11 +27,21 @@
 {% endif %}
 </h1>
 
-{% if parent %}
-<div>
-	<a href="{% event_link_add_to parent 'css_id' 1 %}">Add an event</a>
-	<br/><br/>
-</div>
+{% if parent and parent.name %} {# group #}
+    {% is_group_admin parent for user as grpadmin %}
+    {% if grpadmin or parent.visible_name %}
+    <div>
+    	<a href="{% event_link_add_to parent 'css_id' 1 %}">Add an event</a>
+    	<br/><br/>
+    </div>
+    {% endif %}
+{% else %}
+    {% if parent and parent.visible_name %} {# user #}
+    <div>
+    	<a href="{% event_link_add_to parent 'css_id' 1 %}">Add an event</a>
+    	<br/><br/>
+    </div>
+    {% endif %}
 {% endif %}
 
 <div id="calendar" style="float: left; border-width: 1px;" class="ui-corner-all">

@@ -188,6 +188,35 @@ def do_group_is_visible(parser, token):
 
 register.tag('group_is_visible', do_group_is_visible)
 
+class IsGroupAdminNode(template.Node):
+    def __init__(self, group_name, username, context_name):
+        self.group = template.Variable(group_name)
+        self.user = template.Variable(username)
+        self.context_name = context_name
+
+    def render(self, context):
+        try:
+            group = self.group.resolve(context)
+            user = self.user.resolve(context)
+        except template.VariableDoesNotExist:
+            return u''
+        
+        context[self.context_name] = group.user_is_admin(user)
+        return u''
+
+def do_is_group_admin(parser, token):
+    """
+    Provides the template tag {% is_group_admin GROUP for USER as VARIABLE %}
+    """
+    try:
+        _tagname, group_name, _for, username, _as, context_name = token.split_contents()
+    except ValueError:
+        raise template.TemplateSyntaxError(u'%(tagname)r tag syntax is as follows: '
+            '{%% %(tagname)r GROUP for USER as VARIABLE %%}' % {'tagname': _tagname})
+    return IsGroupAdminNode(group_name, username, context_name)
+
+register.tag('is_group_admin', do_is_group_admin)
+
 class CanBulkAddNode(template.Node):
     def __init__(self, group_name, username, context_name):
         self.group = template.Variable(group_name)

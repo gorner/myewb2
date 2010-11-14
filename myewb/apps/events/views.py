@@ -218,7 +218,7 @@ def add(request, app_label, model_name, id):
         return HttpResponseNotFound()
     
     # visibility check
-    if not helpers.is_visible(request.user, obj):
+    if not helpers.is_visible(request.user, obj) or (not obj == request.user and not obj.user_is_admin(request.user)):
         return render_to_response('denied.html', context_instance=RequestContext(request))
 
     if request.method == 'POST':
