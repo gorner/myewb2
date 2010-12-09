@@ -5,6 +5,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
 
+from communities.models import Community
 from conference.constants import *
 from networks.models import Network, ChapterInfo
 from siteutils.models import Address
@@ -38,6 +39,22 @@ class ConferenceRegistration(models.Model):
     def cancel(self):
         self.cancelled = True
         self.chapter = None
+        self.save()
+
+        # remove from delegates group
+        grp, created = Community.objects.get_or_create(slug='conference2011',
+                                                       defaults={'invite_only': True,
+                                                                 'name': 'National Conference 2011 delegates',
+                                                                 'creator': self.user,
+                                                                 'description': 'National Conference 2011 delegates',
+                                                                 'mailchimp_name': 'National Conference 2011',
+                                                                 'mailchimp_category': 'Conference'})
+        grp.remove_member(self.user)
+        
+        # re-enable code
+        if self.code and self.code.expired:
+            self.code.expired = False
+            self.code.save()
         
     def getRefundAmount(self):
         return self.amountPaid - 20
@@ -121,4 +138,9 @@ class AlumniConferenceCode(ConferenceCode):
     def isAvailable(self):
         return True
     
-        
+class QuasiVIPCode(ConferenceCode):
+    def getShortname(self):
+        return 'discounted'
+    
+    def isAvailable(self):
+        return True

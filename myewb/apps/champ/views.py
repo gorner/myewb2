@@ -10,7 +10,7 @@ define a different template segment for each, then build a list and include/pars
 (instead of having them fixed in run_stats() here)....
 """
 
-import csv
+import csv, copy
 from datetime import date
 
 from django.contrib.admin.views.decorators import staff_member_required
@@ -21,14 +21,17 @@ from django.contrib.contenttypes.models import ContentType
 from django.http import HttpResponseNotFound, HttpResponseRedirect, HttpResponse, HttpResponseForbidden
 from django.db.models import Q
 from django.template import RequestContext
+from django.template.loader import render_to_string
+from haystack.query import SearchQuerySet
 
 from base_groups.decorators import group_admin_required
-from networks.decorators import chapter_president_required
+from networks.decorators import chapter_president_required, chapter_exec_required
 from networks.models import Network
 from champ.models import *
 from champ.forms import *
 from siteutils import schoolyear
-from siteutils.helpers import fix_encoding
+from siteutils.helpers import fix_encoding, copy_model_instance
+from siteutils.http import JsonResponse
 
 def run_query(query, filters):
     for f in filters:
@@ -40,22 +43,33 @@ def run_stats(filters):
     ml_metrics = run_query(MemberLearningMetrics.objects.all(), filters)
     ml_hours = 0
     ml_attendance = 0
-    ml_num = ml_metrics.count()
+    ml_events = ml_metrics.count()
     for m in ml_metrics:
         ml_hours += m.duration * m.attendance
         ml_attendance += m.attendance
-    if ml_num:
-        ml_attendance = ml_attendance / ml_num
+    if ml_events:
+        ml_attendance = ml_attendance / ml_events
         
     pe_metrics = run_query(PublicEngagementMetrics.objects.all(), filters)
-    pe_people = 0
+    pe_people_oncampus = 0
+    pe_people_offcampus = 0
+    pe_events = 0
     for p in pe_metrics:
-        pe_people += p.level1 + p.level2 + p.level3
+        if p.location == 'off campus':
+            pe_people_offcampus += p.level1 + p.level2 + p.level3
+        else:
+            pe_people_oncampus += p.level1 + p.level2 + p.level3
+        pe_events += 1
     
     po_metrics = run_query(PublicAdvocacyMetrics.objects.all(), filters)
     po_contacts = 0
     for p in po_metrics:
-        po_contacts += p.units
+        po_contacts += 1
+        
+    adv_metrics = run_query(AdvocacyLettersMetrics.objects.all(), filters)
+    po_letters = 0
+    for p in adv_metrics:
+        po_letters += p.editorials
     
     ce_metrics = run_query(CurriculumEnhancementMetrics.objects.all(), filters)
     ce_students = 0
@@ -80,8 +94,17 @@ def run_stats(filters):
     
     fundraising_metrics = run_query(FundraisingMetrics.objects.all(), filters)
     fundraising_dollars = 0
+    fundraising_dollars_oneoff = 0
+    fundraising_dollars_recurring = 0
+    fundraising_dollars_nonevent = 0
     for f in fundraising_metrics:
         fundraising_dollars += f.revenue
+        if f.recurring == 'one-off':
+            fundraising_dollars_oneoff += f.revenue
+        elif f.recurring == 'recurring':
+            fundraising_dollars_recurring += f.revenue
+        elif f.recurring == 'funding':
+            fundraising_dollars_nonevent += f.revenue
     
     publicity_metrics = run_query(PublicationMetrics.objects.all(), filters)
     publicity_hits = publicity_metrics.count()
@@ -89,8 +112,12 @@ def run_stats(filters):
     context = {}
     context['ml_hours'] = ml_hours
     context['ml_attendance'] = ml_attendance
-    context['pe_people'] = pe_people
+    context['ml_events'] = ml_events
+    context['pe_people_oncampus'] = pe_people_oncampus
+    context['pe_people_offcampus'] = pe_people_offcampus
+    context['pe_events'] = pe_events
     context['po_contacts'] = po_contacts
+    context['po_letters'] = po_letters
     context['ce_students'] = ce_students
     context['ce_hours'] = ce_hours
     context['wo_professionals'] = wo_professionals
@@ -98,6 +125,9 @@ def run_stats(filters):
     context['so_students'] = so_students
     context['so_presentations'] = so_presentations
     context['fundraising_dollars'] = fundraising_dollars
+    context['fundraising_dollars_oneoff'] = fundraising_dollars_oneoff
+    context['fundraising_dollars_recurring'] = fundraising_dollars_recurring
+    context['fundraising_dollars_nonevent'] = fundraising_dollars_nonevent
     context['publicity_hits'] = publicity_hits
     
     return context
@@ -145,15 +175,17 @@ def dashboard(request, year=None, month=None, term=None,
 
     activity_filters, metric_filters = build_filters(year, month, term)
     
+    journals = 0
+    grp = None
     if group_slug:
-        activity_filters.append({'group__slug': group_slug})
-        metric_filters.append({'activity__group__slug': group_slug})
-        journals = run_query(Journal.objects.all(), activity_filters).count()
-        
         grp = get_object_or_404(Network, slug=group_slug)
-    else:
-        journals = 0
-        grp = None
+        
+        if grp.is_chapter():
+            activity_filters.append({'group__slug': group_slug})
+            metric_filters.append({'activity__group__slug': group_slug})
+            journals = run_query(Journal.objects.all(), activity_filters).count()
+        else:
+            grp = None
 
     activity_filters.append({'visible': True})
     metric_filters.append({'activity__visible': True})
@@ -163,6 +195,18 @@ def dashboard(request, year=None, month=None, term=None,
     context['unconfirmed'] = run_query(Activity.objects.filter(confirmed=False), activity_filters).count()
     context['confirmed'] = run_query(Activity.objects.filter(confirmed=True), activity_filters).count()
     context['journals'] = journals
+    
+    natl_activity_filters, natl_metric_filters = build_filters(year, month, term)
+    natl_activity_filters.append({'visible': True})
+    natl_metric_filters.append({'activity__visible': True})
+    natl_metric_filters.append({'activity__confirmed': True})
+    natl_context = run_stats(natl_metric_filters)
+    natl_context['unconfirmed'] = run_query(Activity.objects.filter(confirmed=False), natl_activity_filters).count()
+    natl_context['confirmed'] = run_query(Activity.objects.filter(confirmed=True), natl_activity_filters).count()
+
+    # stuff all national values into context, prepending key with natl_
+    for x, y in natl_context.items():
+        context['natl_' + x] = y
     
     context['group'] = None
     context['yearplan'] = None    
@@ -244,7 +288,7 @@ def new_activity(request, group_slug):
                 metric.save()
             
             request.user.message_set.create(message="Activity recorded")
-            return HttpResponseRedirect(reverse('champ_dashboard', kwargs={'group_slug': group_slug}))
+            return HttpResponseRedirect(reverse('champ_activity', kwargs={'group_slug': group_slug, 'activity_id': activity.id}))
             
         else:
             # create all the other metric forms as blank forms
@@ -271,41 +315,41 @@ def new_activity(request, group_slug):
                                },
                               context_instance=RequestContext(request))
     
-@group_admin_required()
+@chapter_exec_required()
 def confirmed(request, group_slug):
     group = get_object_or_404(Network, slug=group_slug)
     activities = Activity.objects.filter(confirmed=True,
                                          visible=True,
                                          group__slug=group_slug)
-    activites = activities.order_by('-date')
+    activities = activities.order_by('-date')
     
     return render_to_response('champ/activity_list.html',
                               {'confirmed': True,
                                'activities': activities,
                                'group': group,
-                               'is_group_admin': True,
+                               'is_group_admin': group.user_is_admin(request.user),
                                'is_president': group.user_is_president(request.user),
                                },
                                context_instance=RequestContext(request))
     
-@group_admin_required()
+@chapter_exec_required()
 def unconfirmed(request, group_slug):
     group = get_object_or_404(Network, slug=group_slug)
     activities = Activity.objects.filter(confirmed=False,
                                          visible=True,
                                          group__slug=group_slug)
-    activites = activities.order_by('-date')
+    activities = activities.order_by('-date')
     
     return render_to_response('champ/activity_list.html',
                               {'confirmed': False,
                                'activities': activities,
                                'group': group,
-                               'is_group_admin': True,
+                               'is_group_admin': group.user_is_admin(request.user),
                                'is_president': group.user_is_president(request.user)
                                },
                                context_instance=RequestContext(request))
     
-@group_admin_required()
+@chapter_exec_required()
 def activity_detail(request, group_slug, activity_id):
     group = get_object_or_404(Network, slug=group_slug)
     activity = get_object_or_404(Activity, pk=activity_id)
@@ -317,20 +361,65 @@ def activity_detail(request, group_slug, activity_id):
     
     if activity.visible == False:
         request.user.message_set.create(message="That activity has been deleted.")
-        return HttpResponseRedirect(redirect('champ_dashboard', kwargs={'group_slug': group.slug}))
+        return HttpResponseRedirect(reverse('champ_dashboard', kwargs={'group_slug': group.slug}))
     
     return render_to_response('champ/activity_detail.html',
                               {'activity': activity,
                                'group': group,
                                'metric_names': ALLMETRICS,
                                'is_admin': group.user_is_admin(request.user),
-                               'is_group_admin': True,
+                               'is_group_admin': group.user_is_admin(request.user),
                                'is_president': group.user_is_president(request.user)
                                },
                                context_instance=RequestContext(request))
     
 @group_admin_required()
 def activity_edit(request, group_slug, activity_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    activity = get_object_or_404(Activity, pk=activity_id)
+
+    if not activity.group.pk == group.pk:
+        return HttpResponse("Forbidden")
+    
+    if activity.visible == False:
+        return HttpResponse("That activity has been deleted.")
+    
+    if activity.confirmed:
+        return HttpResponse("This activity is already confirmed - you can't edit it any more")
+
+    if request.method == 'POST':
+        form = ChampForm(request.POST, instance=activity)
+        
+        if form.is_valid():
+            activity = form.save()
+            status = 'success'
+            template = "champ/activity_basic.html"
+        else:
+            status = 'error'
+            template = "champ/activity_edit.html"
+            
+        html = render_to_string(template,
+                                {'group': group,
+                                 'activity': activity,
+                                 'is_group_admin': True,
+                                 'form': form})
+        return JsonResponse({'status': status,
+                             'html': html,
+                             'metricname': 'basic'})
+    else:
+        form = ChampForm(instance=activity)
+        
+    return render_to_response("champ/activity_edit.html",
+                              {'group': group,
+                               'activity': activity,
+                               'is_group"admin': True,
+                               'form': form},
+                              context_instance=RequestContext(request))
+
+
+    
+@group_admin_required()
+def activity_edit2(request, group_slug, activity_id):
     group = get_object_or_404(Network, slug=group_slug)
     activity = get_object_or_404(Activity, pk=activity_id)
     
@@ -449,6 +538,58 @@ def activity_confirm(request, group_slug, activity_id):
     return HttpResponseRedirect(reverse('champ_activity', kwargs={'group_slug': group_slug, 'activity_id': activity_id}))
 
 @group_admin_required()
+def activity_unconfirm(request, group_slug, activity_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    activity = get_object_or_404(Activity, pk=activity_id)
+    
+    if not activity.group.pk == group.pk:
+        return HttpResponseForbidden()
+    
+    if activity.visible == False:
+        request.user.message_set.create(message="That activity has been deleted.")
+        return HttpResponseRedirect(redirect('champ_dashboard', kwargs={'group_slug': group.slug}))
+    
+    if not activity.confirmed:
+        request.user.message_set.create(message="This activity isn't confirmed")
+
+    else:
+        activity.confirmed = False
+        activity.save()
+        request.user.message_set.create(message="Activity un-confirmed.  Don't forget to confirm it again when you're done editing!")
+        
+    return HttpResponseRedirect(reverse('champ_activity', kwargs={'group_slug': group_slug, 'activity_id': activity_id}))
+
+@group_admin_required()
+def activity_copy(request, group_slug, activity_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    old_activity = get_object_or_404(Activity, pk=activity_id)
+
+    if not old_activity.group.pk == group.pk:
+        return HttpResponseForbidden()
+    
+    if old_activity.visible == False:
+        request.user.message_set.create(message="That activity has been deleted.")
+        return HttpResponseRedirect(redirect('champ_dashboard', kwargs={'group_slug': group.slug}))
+
+    activity = Activity(name=old_activity.name + " (copy)",
+                        creator=request.user,
+                        editor=request.user,
+                        group=group,
+                        prepHours=old_activity.prepHours,
+                        execHours=old_activity.execHours,
+                        numVolunteers=old_activity.numVolunteers)
+    activity.save()
+    
+    for old_metric in old_activity.get_metrics():
+        metric = copy_model_instance(old_metric)
+        metric.pk = None
+        metric.activity = activity
+        metric.save()
+        
+    request.user.message_set.create(message="Activity copied (be sure to update the name and date)")
+    return HttpResponseRedirect(reverse('champ_activity', kwargs={'group_slug': group_slug, 'activity_id': activity.id}))
+
+@group_admin_required()
 def activity_delete(request, group_slug, activity_id):
     group = get_object_or_404(Network, slug=group_slug)
     activity = get_object_or_404(Activity, pk=activity_id)
@@ -471,6 +612,231 @@ def activity_delete(request, group_slug, activity_id):
                                    'is_group_admin': True,
                                    'is_president': group.user_is_president(request.user)},
                                   context_instance=RequestContext(request))
+
+@chapter_exec_required()
+def activity_as_pdf(request, group_slug, activity_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    activity = get_object_or_404(Activity, pk=activity_id)
+    
+    if not activity.group.pk == group.pk:
+        return HttpResponseForbidden()
+    
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, Image, Spacer, SimpleDocTemplate
+        from reportlab.lib import enums
+        import settings
+    except:
+        return HttpResponse("Missing library")
+    
+    width, pageHeight = letter
+    response = HttpResponse(mimetype='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename=champ_activity.pdf'
+    
+    stylesheet = getSampleStyleSheet()
+    normalStyle = copy.deepcopy(stylesheet['Normal'])
+    normalStyle.fontName = 'Times-Roman'
+    normalStyle.fontSize = 12
+    normalStyle.leading = 15
+    
+    bold = copy.deepcopy(normalStyle)
+    bold.fontName = 'Times-Bold'
+    bold.leftIndent = 6
+
+    rightAlign = copy.deepcopy(normalStyle)
+    rightAlign.alignment = enums.TA_RIGHT
+
+    lindent = copy.deepcopy(normalStyle)
+    lindent.leftIndent = 12
+
+    bground = copy.deepcopy(normalStyle)
+    bground.backColor = '#e0e0e0'
+
+    h1 = copy.deepcopy(normalStyle)
+    h1.fontName = 'Times-Bold'
+    h1.fontSize = 18
+    h1.leading = 22
+    h1.backColor = '#d0d0d0'
+    h1.borderPadding = 3
+    h1.spaceBefore = 3
+    h1.spaceAfter = 3
+
+    h2 = copy.deepcopy(normalStyle)
+    h2.fontName = 'Times-Bold'
+    h2.fontSize = 14
+    h2.leading = 18
+    h2.backColor = '#e8e8e8'
+    h2.borderPadding = 3
+    h2.spaceBefore = 3
+    h2.spaceAfter = 3
+
+    page = SimpleDocTemplate(response, pagesize=letter, title="EWB Event Summary")
+    p = []
+    
+    p.append(Paragraph("Engineers Without Borders Canada", normalStyle))
+    p.append(Paragraph("Event Summary", normalStyle))
+    p.append(Spacer(0, -50))
+    img = Image(settings.MEDIA_ROOT + '/images/emaillogo.jpg', 100, 51)
+    img.hAlign = 'RIGHT'
+    p.append(img)
+    #p.line(50, height - 90, width - 50, height - 90)
+    p.append(Spacer(0, 10))
+
+    p.append(Paragraph("<strong>" + str(activity.date) + "</strong>", rightAlign))
+    p.append(Paragraph("Printed: " + str(date.today()), rightAlign))
+    p.append(Spacer(0, -20))
+
+    p.append(Paragraph("<strong>" + group.chapter_info.chapter_name + "</strong>", normalStyle))
+    p.append(Spacer(0, 20))
+    
+    p.append(Paragraph(activity.name, h1))
+    p.append(Spacer(0, 10))
+
+    p.append(Paragraph("<strong>Volunters:</strong> " + str(activity.numVolunteers), normalStyle))
+    p.append(Paragraph("<strong>Prep time:</strong> " + str(activity.prepHours) + " person hours", normalStyle))
+    p.append(Paragraph("<strong>Execution time:</strong> " + str(activity.execHours) + " person hours", normalStyle))
+    p.append(Spacer(0, 10))
+    
+    for m in activity.get_metrics():
+        metricname = ''
+        for mshort, mlong in ALLMETRICS:
+            if mshort == m.metricname:
+                metricname = mlong
+                
+        p.append(Paragraph(metricname, h2))
+        for x, y in m.get_values().items():
+            if x and y:
+                p.append(Paragraph(str(x), bold))
+                p.append(Paragraph(str(y), lindent))
+                p.append(Spacer(0, 10))
+            
+        p.append(Spacer(0, 10))
+        
+    
+    page.build(p)
+    return response
+
+@group_admin_required()
+def metric_add(request, group_slug, activity_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    activity = get_object_or_404(Activity, pk=activity_id)
+
+    if not activity.group.pk == group.pk:
+        return HttpResponse("Forbidden")
+    
+    if activity.visible == False:
+        return HttpResponse("That activity has been deleted.")
+    
+    if activity.confirmed:
+        return HttpResponse("This activity is already confirmed - you can't edit it any more")
+
+    if request.method == 'POST' and request.POST.get('metrictype', None):
+        metrictype = request.POST['metrictype']
+        
+        form = METRICFORMS[metrictype]()
+        metric = form.Meta.model()
+        metric.activity = activity
+        metric.save()
+        
+        html = render_to_string("champ/metrics.html",
+                                {'group': group,
+                                 'activity': activity,
+                                 'metric': metric,
+                                 'metric_names': ALLMETRICS,
+                                 'is_group_admin': True})
+        return JsonResponse({'status': 'success',
+                             'html': html,
+                             'metricname': metric.metricname,
+                             'metricid': metric.id})
+    
+    else:
+        return HttpResponse("Error: unknown metric type")
+
+    
+# This should always be an ajax call...!
+@group_admin_required()
+def metric_edit(request, group_slug, activity_id, metric_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    activity = get_object_or_404(Activity, pk=activity_id)
+    metric = get_object_or_404(Metrics, id=metric_id)
+
+    if not activity.group.pk == group.pk:
+        return HttpResponse("Forbidden")
+    
+    if activity.visible == False:
+        return HttpResponse("That activity has been deleted.")
+    
+    if activity.confirmed:
+        return HttpResponse("This activity is already confirmed - you can't edit it any more")
+
+    metric = getattr(metric, metric.metric_type)    # fix subclassing...
+    
+    if request.method == 'POST':
+        form = METRICFORMS[metric.metricname](request.POST,
+                                              instance=metric,
+                                              prefix=metric.metricname)
+        if form.is_valid():
+            metric = form.save()
+            status = 'success'
+            template = "champ/metrics.html"
+        else:
+            status = 'error'
+            template = "champ/metrics_edit.html"
+            
+        html = render_to_string(template,
+                                {'group': group,
+                                 'activity': activity,
+                                 'metric': metric,
+                                 'metric_names': ALLMETRICS,
+                                 'is_group_admin': True,
+                                 'form': form})
+        return JsonResponse({'status': status,
+                             'html': html,
+                             'metricname': metric.metricname})
+    else:
+        form = METRICFORMS[metric.metricname](instance=metric,
+                                              prefix=metric.metricname)
+        
+    return render_to_response("champ/metrics_edit.html",
+                              {'group': group,
+                               'activity': activity,
+                               'metric': metric,
+                               'metric_names': ALLMETRICS,
+                               'form': form},
+                              context_instance=RequestContext(request))
+
+@group_admin_required()
+def metric_remove(request, group_slug, activity_id, metric_id):
+    group = get_object_or_404(Network, slug=group_slug)
+    activity = get_object_or_404(Activity, pk=activity_id)
+    metric = get_object_or_404(Metrics, id=metric_id)
+
+    if not activity.group.pk == group.pk:
+        return HttpResponse("Forbidden")
+    
+    if activity.visible == False:
+        return HttpResponse("That activity has been deleted.")
+    
+    if activity.confirmed:
+        return HttpResponse("This activity is already confirmed - you can't edit it any more")
+
+    metric = getattr(metric, metric.metric_type)    # fix subclassing...
+    
+    if request.method == 'POST':
+        metric.delete()
+        
+        label = ''
+        for m, mname in ALLMETRICS:
+            if m == metric.metricname:
+                label = mname
+        
+        return JsonResponse({'status': 'success',
+                             'metricname': metric.metricname,
+                             'metriclabel': label})
+    else:
+        return JsonResponse({'status': 'error'})
 
 @chapter_president_required()
 def journal_list(request, group_slug):
@@ -565,6 +931,27 @@ def yearplan(request, group_slug, year=None):
                                'is_president': group.user_is_president(request.user)
                                },
                                context_instance=RequestContext(request))
+
+@chapter_exec_required()
+def champ_search(request):
+    query = ''
+    results = []
+    qs = SearchQuerySet().models(Activity)
+    
+    form = CHAMPSearchForm(request.GET,
+                           searchqueryset=qs)
+                            # , load_all=True
+    
+    if form.is_valid():
+        results = form.search()
+    
+    context = {
+        'form': form,
+        'results': results,
+    }
+    
+    return render_to_response("champ/search.html", context, context_instance=RequestContext(request))
+
 
 @group_admin_required()
 def csv_so(request, group_slug):

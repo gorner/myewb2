@@ -42,7 +42,10 @@ def login(request):
         if request.POST['action'] == 'signin':
             signin_form = EmailLoginForm(request.POST)
             if signin_form.is_valid():
-                auth.login(request, signin_form.user)
+                user = signin_form.user
+                user.is_bulk = False
+                user.save()
+                auth.login(request, user)
                 return HttpResponseRedirect(reverse('confreg'))
         else:
             signup_form = ConferenceSignupForm(request.POST)
@@ -73,6 +76,8 @@ def view_registration(request):
         # cancellation or a receipt
         registration = ConferenceRegistration.objects.get(user=user, cancelled=False)
         form = None
+
+        return HttpResponseRedirect(reverse('confcomm_app'))
 
     except ObjectDoesNotExist:
         # if not registered, we display the registration form
@@ -167,17 +172,16 @@ def cancel(request):
         send_mail('Confreg cancelled', body, 'mailer@my.ewb.ca',
                   ['monitoring@ewb.ca'], fail_silently=False)
 
-        # tell the user and redirect them back out
-        request.user.message_set.create(message="Your registration has been cancelled.")
-        
-        return HttpResponseRedirect(reverse('confreg'))
-
+        cancelled = True
     else:
-        # this template will show a confirm page.
-        return render_to_response('conference/cancel.html',
-                                  {'reg': registration},
-                                   context_instance=RequestContext(request)
-                                   )
+        cancelled = False
+        
+    # this template will show a confirm page.
+    return render_to_response('conference/cancel.html',
+                              {'reg': registration,
+                               'cancelled': cancelled},
+                               context_instance=RequestContext(request)
+                               )
     
 @login_required
 def list(request, chapter=None):
@@ -246,6 +250,7 @@ def generate_codes(request):
                     code, created = ConferenceCode.objects.get_or_create(type=type, number=i, code=code.code)
 
                     if request.POST.get('action', None) == "void":
+                        
                         code.expired = True
                         code.save()
                         codes.append("voided - " + code.code)

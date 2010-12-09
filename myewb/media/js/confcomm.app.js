@@ -1,57 +1,65 @@
 ;(function(GLOBALS) {
+
+    // variable definitions so we don't grab
+    // global scope.
+    var routes;
+    var current_username;
+    var filter_lists;
+    var anon;
+    // holds the current users' profile
+    var current_profile;
+    var show_opt_links;
+    // holds the profiles collection
+    var profiles;
+    // holds the cohort summary collection
+    var cohort_summaries;
+    /* VIEW VARIABLES */
+    var filters_view;
+    var browser_view;
+    var get_chapter_view;
+    var login_view;
+    var my_profile_view;
+    var news_view;
+    var quick_cohorts_view;
+    var browser_pagination_view;
+    var loading_image;
+    var name_filter_view;
+    var hash_history;
+    var facebox_history;
+    var invitation_view;
+    var messages;
+
+    // keeps track of whether the twitter script has been loaded yet
+    var twitter_loaded;
+
+    // keeps track of whether or not there are unsaved changes
+    var unsaved_changes = false;
+
     // needs the following globals
     // routes, current_user
     /* SERVER ROUTES */
-    if (!console) {
-        console = {
-            log: function(args) {
-                // do nothing
-            }
-        }
-    }
-
-    var DEBUG = false;
-    if (!DEBUG) { // leave a bunch of global variables so I can get at them through the console
-        var routes;
-        var current_username;
-        var filter_lists;
-        var anon;
-        // holds the current users' profile
-        var current_profile;
-        var show_opt_links;
-        // holds the profiles collection
-        var profiles;
-        // holds the cohort summary collection
-        var cohort_summaries;
-        /* VIEW VARIABLES */
-        var filters_view;
-        var browser_view;
-        var get_chapter_view;
-        var login_view;
-        var my_profile_view;
-        var news_view;
-        var quick_cohorts_view;
-        var browser_pagination_view;
-        var loading_image;
-        var name_filter_view;
-        var hash_history;
-        var show_my_profile;
-        var invitation_view;
-        var messages;
-    }
     routes = GLOBALS.routes;
     current_username = GLOBALS.username;
     filter_lists = GLOBALS.filter_lists;
     loading_image = GLOBALS.loading_image;
     anon = GLOBALS.anon;
     show_opt_links = true;
+    twitter_loaded = false;
 
     /* MODELS */
     var ConferenceProfile = Backbone.Model.extend({
+        // set id to the username provided
         initialize: function() {
             var self = this;
             if (!self.id) self.id = self.get('username');
+            var props = ['conference_question', 'conference_goals', 'text_interests', 'what_now'];
+            _.each(props, function(p) {
+                if (!self.get(p)) {
+                    self.set({p:""});
+                }
+            });
         },
+        // grab what might be the top most important cohorts
         quick_cohorts: function() {
             var self = this;
             if (self['_quick_cohorts']) {
@@ -62,15 +70,19 @@
             var cohorts = self.get('cohorts');
             if (cohorts && cohorts.length) {
                 var sorted_cohorts = _.sortBy(cohorts, function(c) {
+                    // jf, aps and prof are top priority
                     if (_.include(['j', 's', 'f'], c.role)) {
                         return 1;
                     }
+                    // then president
                     else if (c.role === 'p') {
                         return 2;
                     }
+                    // then exec
                     else if (c.role === 'e') {
                         return 3
                     }
+                    // then other
                     else {
                         return 4;
                     }
@@ -83,6 +95,7 @@
             var self = this;
             return routes.profile_base + self.id + '/';
         },
+        // internal to the app hash function
         hash: function() {
             var self = this;
             return '/profile/?id=' + self.id;
@@ -96,6 +109,12 @@
         initialize: function() {
             var self = this;
             if (!self.id) self.id = self.get('username');
+            if (!self.get('blurb')) {
+                self.set({blurb:''});
+            }
+            if (!self.get('name')) {
+                self.set({name:''});
+            }
         },
         hash: function() {
             var self = this;
@@ -180,7 +199,9 @@
             }
             return t;
         },
+        // private state variable
         _state: {},
+        // private function that filters state when setting state
         _filter_state: function(state) {
             // override this to filter state values
             return state;
@@ -209,6 +230,7 @@
             // everything has passed so state is the same
             return true;
         },
+        // default loading function when view is loading
         loading: function(extra_content) {
             var self = this;
             if (!self.el) {
@@ -222,6 +244,7 @@
                 }
             ));
         },
+        // render function when the view needs to asynchronously fetch data
         async_render: function(id, collection, user_callbacks) {
             var self = this;
             self.model = collection.get(id);
@@ -242,10 +265,6 @@
                 if (user_callbacks['error']) {
                     callbacks.error = user_callbacks.error;
                 }
-                // get our loading function. not appropriate if we're not faceboxing though?
-                // $.facebox(function() {
-                //     model_to_get.fetch(callbacks);
-                // });
                 self.loading();
                 model_to_get.fetch(callbacks);
             }
@@ -253,18 +272,26 @@
                 self.render();
             }
         },
-        _default_context: {
-            globals: GLOBALS,
-            routes: routes,
-            show_opt_links: show_opt_links
+        // default context to use when using draw function to render
+        // this is a function so literals (i.e. anon) are always their
+        // current value
+        _default_context: function() {
+            return {
+                globals: GLOBALS,
+                routes: routes,
+                show_opt_links: show_opt_links,
+                anon: anon
+            }
         },
+        // replace self.el with the template including the default context
         draw: function(extra_context) {
             var self = this;
-            var context = _.extend({}, self._default_context, extra_context);
+            var context = _.extend(self._default_context(), extra_context);
             $(self.el).html(_.template(self.template(), context));
         }
     });
 
+    // view for an individual profile
     var ProfileView = BaseView.extend({
         el: $('#profile .profile-content'),
         template_name: 'profile.html',
@@ -272,21 +299,27 @@
             $('#loading-widget').show();
         },
         to_cohort: function(e) {
-            e.preventDefault();
-            hash_history.push($(e.target).attr('href'));
-            hash_history.push($(e.target).attr('href'));
+            // pop one off the facebox stack since we don't want
+            // to go back when closing the facebox
+            facebox_history.pop();
             $(document).trigger('close.facebox');
         },
         render: function() {
             $('#loading-widget').hide();
             var self = this;
-            $(self.el).html(_.template(self.template(), {model:self.model}));
+            self.draw({model: self.model});
+            // put contents of #profile into a facebox
+            facebox_history.push(location.hash);
             $.facebox({div:'#profile'});
-            // set up events inside of facebox instead of delgating and changing el
+            // set up events inside of facebox
             $('#facebox a.cohort-link').click(self.to_cohort);
         }
     });
+    // view for a user to update their profile
+    // renders profile form in a facebox
     var ProfileFormView = BaseView.extend({
+        // require a content holder since our view will
+        // be rendered in the facebox
         content_holder: '#profile-form-container',
         el: $('#profile-form-container'),
         template_name: 'profile_form.html',
@@ -298,7 +331,28 @@
             _.each(inputs, function(i) {
                 if (i.name) data[i.name] = i.value;
             });
+            // validate input - make sure there are no errors
+            var reqd = {
+                'conference_goals': 'What you are excited about', 
+                'conference_question': 'What you want to discuss',
+                'text_interests': 'Your current interests',
+                'what_now': 'What you are doing now'
+            }
+            var errors = [];
+            for (f in reqd) {
+                if (!data[f]) {
+                    errors.push(reqd[f]);
+                }
+            }
+            if (errors.length > 0) {
+                messages.error('Please fill out all of the questions in the form before submitting. The following fields are missing: ' + errors.join(', '));
+                return;
+            }
             var id = self.model.username || self.model.id;
+            // set unsaved_changes to false because even if we error after this
+            // we can't get our form values back for now
+            unsaved_changes = false;
+            self.loading();
             if (data['avatar']) {
                 // submit form through iframe
                 self.$('form').ajaxSubmit({
@@ -309,17 +363,16 @@
                         delete data['avatar'];
                         messages.info('Photo uploaded successfully.', {header: 'Photo uploaded successfully.'});
                         self.model.save(data, {success: function(){
-                            hash_history.push('#/');
-                            location.hash='/profile/?id=' + id;
+                            location.hash=self.model.hash();
                             messages.info('Your profile information has been successfully updated.', {'header': 'Profile Updated'});
                             my_profile_view.render();
                             }});
                     }});
             }
             else {
+                messages.info('Updating profile...');
                 self.model.save(data, {success: function(){
-                    hash_history.push('#/');
-                    location.hash='/profile/?id=' + id;
+                    location.hash=self.model.hash();
                     messages.info('Your profile information has been successfully updated.', {'header': 'Profile Updated'});
                 }});
                 return false;
@@ -333,16 +386,27 @@
             }
             // since our form is in the facebox we have to do some monkey business here
             // use content_holder to render the template
-            $(self.content_holder).html(_.template(self.template(), {model:self.model, avatar_url:routes.avatar_url}));
+            // reset el to the content_holder for draw
+            self.el = $(self.content_holder);
+            self.draw({model: self.model});
             $.facebox({div:self.content_holder});
             // after facebox copies the html to its own div, reset self.el to the 
-            // content in the facebox
+            // content in the facebox. We need this to grab the form contents on submit.
             self.el = $('#facebox').find('.content').first();
             // re-delegate the events so they are attached to the facebox copy of the
             // form
-            // XXX: Might not work in IE with submit event so have to manually go
-            //self.delegateEvents();
-            self.$('form').bind('submit', function() { self.update_profile(); return false;});
+            self.$('form').submit(function() { self.update_profile(); return false;});
+            self.$('form textarea').each(function() {
+            	$(this).focus(function() {
+            		if (!$(this).data('original'))
+            			$(this).data('original', $(this).val());
+            	});
+            	$(this).blur(function() {
+            		var orig = $(this).data('original');
+            		if (orig != $(this).val())
+            			unsaved_changes = true;
+            	});
+            });
         }});
     var FiltersView = BaseView.extend({
         el: $('#filters'),
@@ -379,7 +443,22 @@
                     elem.val(val);
                 }
                 else {
-                    elem.val('');
+                    // except roles since the default is 'm' instead of ''
+                    if (elem.attr('name') === 'role') {
+                        elem.val('m');
+                    }
+                    else {
+                        elem.val('');
+                    }
+                }
+                if (elem.attr('name') === 'last_name') {
+                    if (elem.val()) {
+                        name_filter_view.current_letter = elem.val();
+                    }
+                    else {
+                        name_filter_view.current_letter = 'All';
+                    }
+                    name_filter_view.render();
                 }
             });
             // need to reset the visible counterparts to the
@@ -394,16 +473,30 @@
         },
         render: function() {
             var self = this;
-            $(self.el).html(_.template(self.template(), {filter_lists: filter_lists}));
+            self.draw();
             self.delegateEvents();
         }});
+
     var NewsView = BaseView.extend({
         el: $('#news'),
         template_name: 'news.html',
         render: function() {
             var self = this;
-            $(self.el).html(_.template(self.template()));
+            self.draw({current_profile: current_profile});
+            // load tweet this widget
+            if (twitter_loaded === false) {
+                var l = location.href;
+                if (l.match(/^https/)) {
+                    // no ssl compliant twitter button unfortunately
+                    $('#twitter-share').hide();
+                }
+                else {
+                    $.getScript('http://platform.twitter.com/widgets.js');
+                }
+                twitter_loaded = true;
+            }
         }});
+
     var MyProfileView = BaseView.extend({
         el: $('#my-profile'),
         events: {
@@ -417,9 +510,6 @@
             if (anon) {
                 return
             }
-            // push a dummy value onto the history 
-            // since we will be opening a facebox
-            hash_history.push('#/');
             var self = this;
             profile_form_view.model = profiles.get(current_username);
             profile_form_view.render();
@@ -431,10 +521,15 @@
                 url: routes.logout_url,
                 success: function() {
                     self.hide();
+                    messages.info('You are now logged out. Hope you come back soon!', {header: 'Logged out.'});
                     anon = true;
+                    news_view.render();
                     current_username = null;
                     login_view.error_message = "";
+                    // XXX this should be tied to an event someday probably
                     login_view.show();
+                    // go back to the home page
+                    location.hash = '#/';
                 },
                 error: function() {
                     self.render();
@@ -446,7 +541,30 @@
         render: function() {
             var self = this;
             self.draw({model:self.model});
-        }});
+        },
+        show: function() {
+            var self = this;
+            current_profile = new ConferenceProfile({
+                id: current_username
+            });
+            $(self.el).show();
+            self.loading();
+            current_profile.fetch({success: function(){
+                messages.info('Welcome ' + current_profile.get('member_profile').name + '!', {header: 'Logged in.'});
+                profiles.add(current_profile);
+                self.model = current_profile;
+                self.render();
+                // XXX bit of a hack here
+                news_view.render();
+                quick_cohorts_view.model = current_profile;
+                quick_cohorts_view.render();
+                if (!current_profile.get('active')) {
+                    messages.info('Please take a moment to update your profile.', {life: 3000});
+                    self.edit_profile();
+                }
+            }});
+        }
+        });
     var QuickCohortsView = BaseView.extend({
         el: $('#quick-cohorts'),
         template_name: 'quick_cohorts.html',
@@ -471,7 +589,11 @@
                         self.hide();
                         current_username = data.username;
                         anon = false;
-                        show_my_profile();
+                        // XXX hack - should be event driven
+                        my_profile_view.show();
+                        // XXX bit of a hack... oh the last minute shortcuts
+                        // should be event driven
+                        app.getView('Browser').render();
                     }
                     else {
                         self.error_message = data.message;
@@ -484,7 +606,7 @@
         },
         render: function() {
             var self = this;
-            $(self.el).html(_.template(self.template(), {error_message: self.error_message, login_name: self.login_name}));
+            self.draw({error_message: self.error_message, login_name: self.login_name});
 
             self.$('form').unbind('submit').bind('submit', function() {
                 self.login();
@@ -515,7 +637,7 @@
                 data: data,
                 contentType: 'application/json',
                 success: function(resp, status) {
-                    messages.info('Added to cohort.');
+                    messages.info('Added to group.');
                     // if no username in the target
                     // fetch the current_profile
                     // since it is being updated
@@ -523,12 +645,13 @@
                     if (target.match(no_username)) {
                         current_profile.fetch();
                     }
+                    // XXX hack - should be event driven
                     browser_view.collection.fetch({success: function() {
                         browser_view.render();
                     }});
                 },
                 error: function(resp, status) {
-                    messages.error('Could not add to cohort.');
+                    messages.error('Could not add to group.');
                     self.render();
                 }
             });
@@ -551,7 +674,7 @@
             'click a.cohort-add' : 'add_to_cohort',
             'click a.cohort-add-abstract' : 'get_chapter',
             'click a.cohort-remove' : 'remove_from_cohort',
-            'click a.hide-opt-links' : 'hide_opt_links',
+            'click a.hide-opt-links' : 'hide_opt_links'
         },
         // attach some events that are outside of the scope of el
         bind_to_filters: function() {
@@ -560,6 +683,7 @@
                 self.update_filters();
             });
         },
+        // XXX should be event driven some day to some thing like filter_change
         _filter_state: function(state) {
             var new_state = {};
             _.each(['chapter', 'role', 'year', 'last_name', 'page', 'search', 'registered'], function(f) {
@@ -572,27 +696,26 @@
         template_name: 'browser.html',
         update_filters: function() {
             var qs = $('#filter-controls').serialize();
+            // serialize turns spaces into +
+            // we don't want that
+            qs = qs.replace(/\+/g, '%20');
             location.hash = '/?' + qs;
         },
         open_invite: function(e) {
             var self = this;
             e.preventDefault();
             if (anon) {
-                // have to prevent the default and then set the 
-                // location.hash manually so we don't get the hashchange
-                // after the fact
-                // location.hash = $(e.target).attr('href');
                 messages.info("Please login to send an invite.", {header: 'Please login.'});
-                // location.hash = hash_history.pop();
                 $("#id_login_name").focus();
                 return;
             }
-            var id = $(e.target).parents('div.profile-summary').first().attr('id').split('-')[0];
+            // dependent on having a .profile-summary div with an id of <id>-summary
+            var idx = $(e.target).parents('div.profile-summary').first().attr('id').lastIndexOf('-');
+            var id = $(e.target).parents('div.profile-summary').first().attr('id').substring(0, idx);
             if (!id) {
                 return;
             }
-            // push a dummy value onto the hash_history since we'll be opening a facebox
-            hash_history.push('#/');
+            // XXX hack - should be event driven
             var view = invitation_view;
             view.async_render(id, cohort_summaries, {
                 error: function () {
@@ -631,12 +754,16 @@
         get_chapter: function(e) {
             e.preventDefault();
             var target = $(e.target).attr('href').split('#/')[1];
+            // XXX minor hack - should probably be event driven but maybe not
             get_chapter_view.target = target;
             get_chapter_view.render();
         },
         remove_from_cohort: function(e) {
             var self = this;
             e.preventDefault();
+            if (!confirm('Are you sure?')) {
+                return;
+            }
             var target = $(e.target).attr('href').split('#/')[1];
             self.loading();
             $.ajax({
@@ -649,13 +776,15 @@
                     if (target.match(no_username)) {
                         current_profile.fetch();
                     }
-                    messages.info('Removed from cohort. <a href="#">Undo</a>');
+                    // XXX undo - someday...
+                    messages.info('Removed from group.'); // <a class="undo-removal" href="#/' + target + '">Undo</a>', {sticky: true});
+                    // $('.undo-removal').click(self.add_to_cohort);
                     self.collection.fetch({success: function() {
                         self.render();
                     }});
                 },
                 error: function(resp, status) {
-                    messages.error('Could not remove from cohort.');
+                    messages.error('Could not remove from group.');
                     self.render();
                 }
             });
@@ -669,8 +798,7 @@
         render: function() {
             var self = this;
             self.draw({
-                collection: self.collection,
-                kohort_king: GLOBALS.kohort_king
+                collection: self.collection
             });
             self.paginator.render();
             self.delegateEvents();
@@ -681,8 +809,9 @@
         render: function() {
             var self = this;
             self.el = $('.paginator');    // @@@ SEAN
-            $(self.el).html(_.template(self.template(), {model: self.model}));
+            self.draw({model: self.model});
         }});
+    // separate view for filter by last name
     var NameFilterView = BaseView.extend({
         template_name: 'last_name_filter.html',
         current_letter: 'All',
@@ -704,7 +833,7 @@
         render: function() {
             var self = this;
             self.el = $('#name-filter');
-            $(self.el).html(_.template(self.template(), {current_letter: self.current_letter}));
+            self.draw({current_letter: self.current_letter});
             self.delegateEvents();
         }
     });
@@ -712,7 +841,8 @@
         template_name: 'invitation.html',
         content_holder: '#invitation',
         el: $('#invitation'),
-        send_invitation: function() {
+        send_invitation: function(e) {
+            e.preventDefault();
             var self = this;
             var inputs = self.$('form').find('.invitation-input');
             var data = {};
@@ -720,6 +850,9 @@
                 if (i.name) data[i.name] = i.value;
             });
             data['sender'] = current_username;
+            // we no longer have unsaved changes on the form
+            // even if it errors below we can't get it back for now
+            unsaved_changes = false;
             self.loading();
             $.ajax({url: routes.email, data:data, type:'post',
                 success:function(resp) {
@@ -731,23 +864,32 @@
                     messages.error('Your invitation could not be sent.')
                 }
             });
-            return false;
         },
         render: function() {
             var self = this;
             // since our form is in the facebox we have to do some monkey business here
             // use content_holder to render the template
+            // grab the first name
             var sender_name = current_profile.get('member_profile').name.split(' ')[0];
-            $(self.content_holder).html(_.template(self.template(), {model: self.model, site_url: routes.site_url, sender_name:sender_name}));
+            $(self.content_holder).html(_.template(self.template(), {model: self.model, site_url: routes.site_url, sender_name:sender_name, routes:GLOBALS.routes}));
             $.facebox({div:self.content_holder});
             // after facebox copies the html to its own div, reset self.el to the
-            // content in the facebox
+            // content in the facebox - required to grab the form elements later
             self.el = $('#facebox').find('.content').first();
             // re-delegate the events so they are attached to the facebox copy of the
             // form
-            // XXX: Might not work in IE with submit event so have to manually go
-            //self.delegateEvents();
-            self.$('form').bind('submit', function() { self.send_invitation(); return false;});
+            self.$('form').bind('submit', function(e){self.send_invitation(e)});
+            self.$('form textarea').each(function() {
+            	$(this).focus(function() {
+            		if (!$(this).data('original'))
+            			$(this).data('original', $(this).val());
+            	});
+            	$(this).blur(function() {
+            		var orig = $(this).data('original');
+            		if (orig != $(this).val())
+            			unsaved_changes = true;
+            	});
+            });
         }
     });
     /* CONTROLLER */
@@ -758,12 +900,21 @@
         },
         views: {
             'Profile': ProfileView,
-            'Browser': BrowserView,
+            'Browser': BrowserView
         },
         browser: function(args) {
+            // when using the back or forward button we might have an open
+            // facebox - pop one off the top of facebox_history since we don't
+            // want to change the url and close it
+            facebox_history.pop();
+            $(document).trigger('close.facebox');
             var self = this;
             var view = self.getView('Browser');
-            // a bit of an ugly hack here
+            // unescape all of our arguments since some have spaces
+            for (arg in args) {
+                args[arg] = unescape(args[arg]);
+            }
+            // XXX a bit of an ugly hack here
             filters_view.update_from_args(args);
             // fetch the next page of results
             // and render only if the state has changed
@@ -802,6 +953,37 @@
     });
 
     app = new Controller();
+    // set up an alert if users exit a box with unsaved changes
+    //
+    $(document).unbind('close.facebox').bind('close.facebox', function(e) {
+        // check for unsaved changes and show confirm box
+        if (unsaved_changes) {
+            if (!confirm('You have unsaved changes on this page. Are you sure you want to exit?')) {
+                return;
+            }
+            else {
+                unsaved_changes = false;
+            }
+        }
+        // the original close.facebox
+        $(document).unbind('keydown.facebox');
+        $('#facebox').fadeOut(function() {
+          $('#facebox .content').removeClass().addClass('content');
+          // substituting raw code
+          // hideOverlay();
+          // and again for skipOverlay
+          // if (!skipOverlay()) {
+          if (!($.facebox.settings.overlay == false || $.facebox.settings.opacity === null )) {
+              $('#facebox_overlay').fadeOut(200, function(){
+                  $("#facebox_overlay").removeClass("facebox_overlayBG");
+                  $("#facebox_overlay").addClass("facebox_hide");
+                  $("#facebox_overlay").remove();
+              });
+          }
+          $('#facebox .loading').remove()
+        })
+    });
+    
     // abstract away our messaging to jGrowl
     messages = {
         info: function(m, o) {
@@ -825,7 +1007,8 @@
     /* GO TIME */
     $(function() {
 
-        hash_history = ['/'];
+        hash_history = ['#/'];
+        facebox_history = [];
         profiles = new ProfileStore();
         cohort_summaries = new SummaryStore();
         cohort_summaries.base_url = routes.cohorts_base;
@@ -838,8 +1021,8 @@
         get_chapter_view = new GetChapterView;
         news_view = new NewsView;
         news_view.loading();
-        news_view.render();
         quick_cohorts_view = new QuickCohortsView;
+        // anon gets the default hard-coded html
         if (!anon) {
             quick_cohorts_view.loading();
         }
@@ -849,40 +1032,22 @@
         filters_view.render();
         name_filter_view = new NameFilterView;
         name_filter_view.render();
-        // TODO: fix this - a bit of an ugly hack.
+        // XXX: fix this - a bit of an ugly hack.
         browser_view.bind_to_filters();
         invitation_view = new InvitationView;
         // show the my_profile view if the user is logged in
         profile_form_view = new ProfileFormView;
         login_view = new LoginView;
         my_profile_view = new MyProfileView();
-        show_my_profile = function() {
-            current_profile = new ConferenceProfile({
-                id: current_username
-            });
-            $(my_profile_view.el).show();
-            my_profile_view.loading();
-            current_profile.fetch({success: function(){
-                profiles.add(current_profile);
-                my_profile_view.model = current_profile;
-                my_profile_view.render();
-                quick_cohorts_view.model = current_profile;
-                quick_cohorts_view.render();
-                if (!current_profile.get('active')) {
-                    messages.info('Please take a moment to update your profile.', {sticky: true});
-                    // location.hash = '/profile/edit/';
-                    my_profile_view.edit_profile();
-                }
-            }});
-        }
         if (!anon) {
-            show_my_profile();
+            my_profile_view.show();
         }
         // show the login view if the user is not logged in
         else {
             $(login_view.el).show();
             login_view.loading();
             login_view.render();
+            news_view.render();
         }
         if (!location.hash) {
             location.hash = '#/';
@@ -892,20 +1057,23 @@
         }
         // bind some events to facebox to help with nav
         // change back to the last hash when we close a facebox
+        // if appropriate
         $(document).bind('close.facebox', function() {
             // get rid of the top most history entry (the facebox url)
-            hash_history.pop();
-            // pop the last entry off of the hash_history and set location.hash to it
-            // hashchange() will fire and push this value back onto the stack
-            var next_hash = hash_history.pop();
-            // sometimes close.facebox fires twice - causing weird behaviour
-            // like undefined hashes. if there is no hash on the stack then
-            // set location.hash to home
-            if (next_hash) {
-                location.hash = next_hash;
-            }
-            else {
-                location.hash = '#/'
+            if (facebox_history.pop() !== undefined) {
+                hash_history.pop();
+                // pop the last entry off of the hash_history and set location.hash to it
+                // hashchange() will fire and push this value back onto the stack
+                var next_hash = hash_history.pop();
+                // sometimes close.facebox fires twice - causing weird behaviour
+                // like undefined hashes. if there is no hash on the stack then
+                // set location.hash to home
+                if (next_hash) {
+                    location.hash = next_hash;
+                }
+                else {
+                    location.hash = '#/'
+                }
             }
         });
         // keep track of the last hash so we can return to it after

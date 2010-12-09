@@ -15,6 +15,8 @@ from confcomm.forms import ConferenceProfileForm
  
 from avatar.templatetags.avatar_tags import avatar_url
 
+from siteutils.helpers import fix_encoding
+
 class DjangoAuthentication(object):
     """
     Django authentication. 
@@ -50,15 +52,22 @@ class DjangoAuthentication(object):
         return HttpResponseRedirect('%s?%s=%s' %tup)
 
 def conference_profile_read(request, username=None):
+    allowed_filters = ['registered', 'username', 'active',]
     if username is None:
-        kwargs = dict([(str(k),str(v)) for (k, v) in request.GET.items()])
-        return ConferenceProfile.objects.filter(**kwargs)[:6]
+        random = bool(request.GET.get('random', False))
+        count = int(request.GET.get('count', 6))
+        kwargs = dict([(str(k),str(v)) for (k, v) in request.GET.items() if k in allowed_filters])
+        cps = ConferenceProfile.objects.filter(**kwargs)
+        cps.filter(member_profile__user__avatar__isnull=False)
+        if random:
+            cps = cps.order_by('?')
+        return cps[:count]
     p = ConferenceProfile.objects.get(member_profile__user__username=username)
     return p
 
 class AnonymousConferenceProfileHandler(AnonymousBaseHandler):
     model = ConferenceProfile
-    fields = ('conference_question', 'conference_goals', 'what_now', 'registered', 'avatar_url', ('member_profile', ('name', 'about', 'gender',),), 'username', ('cohorts', ('chapter', 'role', 'year', 'display', 'relevant_properties',),),'active',)
+    fields = ('conference_question', 'conference_goals', 'what_now', 'text_interests', 'registered', 'avatar_url', ('member_profile', ('name', 'about', 'gender',),), 'username', ('cohorts', ('chapter', 'role', 'year', 'display', 'relevant_properties',),),'active',)
 
     @classmethod
     def read(self, request, username=None):
@@ -76,7 +85,7 @@ class ConferenceProfileHandler(BaseHandler):
     anonymous = AnonymousConferenceProfileHandler
     model = ConferenceProfile
     allowed_methods = ('GET', 'PUT',)
-    fields = ('conference_question', 'conference_goals', 'what_now', 'registered', 'avatar_url', ('member_profile', ('name', 'about', 'gender',),), 'username', ('cohorts', ('chapter', 'role', 'year', 'display', 'relevant_properties',),),'active',)
+    fields = ('conference_question', 'conference_goals', 'what_now', 'text_interests', 'registered', 'avatar_url', ('member_profile', ('name', 'about', 'gender',),), 'username', ('cohorts', ('chapter', 'role', 'year', 'display', 'relevant_properties',),),'active',)
 
     @classmethod
     def read(self, request, username=None):
@@ -89,6 +98,7 @@ class ConferenceProfileHandler(BaseHandler):
                 member_profile = user.memberprofile_set.get()
                 registered = user.conference_registrations.filter(cancelled=False).count() > 0
                 p = ConferenceProfile.objects.create(member_profile=member_profile, registered=registered)
+                p.add_to_default_cohorts()
                 return p
             resp = rc.NOT_FOUND
             resp.write('No profile found for %s.' % username)
@@ -124,7 +134,7 @@ class CohortHandler(BaseHandler):
     def read(self, request):
         # grab all of the applicable filters
         allowed_filters = ['chapter', 'year', 'role', 'page', 'last_name', 'search', 'registered',]
-        filters = dict([(str(k), str(v)) for (k, v) in request.GET.items() if k in allowed_filters])
+        filters = dict([(str(fix_encoding(k)), str(fix_encoding(v))) for (k, v) in request.GET.items() if k in allowed_filters])
         if filters.get('role', None) == 'm':
             del filters['role']
         if filters.get('year', None):
@@ -151,7 +161,7 @@ class CohortHandler(BaseHandler):
                 cps = cps.filter(member_profile__last_name__istartswith=last_name)
             # add name search filter
             if search is not None:
-                terms = search.split('+')
+                terms = search.split(' ')
                 print terms
                 for search_term in terms:
                     cps = cps.filter(member_profile__name__icontains=search_term)
@@ -195,6 +205,8 @@ class CohortHandler(BaseHandler):
                     'registered': cp.registered,
                     'active': cp.active,
                 }
+            if cp.active:
+                d['blurb'] = cp.blurb
             results.append(d)
 
         # pagination values

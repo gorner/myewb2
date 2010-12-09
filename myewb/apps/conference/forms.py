@@ -19,8 +19,9 @@ from django.shortcuts import render_to_response, get_object_or_404
 from django.template import RequestContext
 from emailconfirmation.models import EmailAddress
 
+from communities.models import Community
 from conference.constants import *
-from conference.models import ConferenceRegistration, ConferenceCode, AlumniConferenceCode, InvalidCode
+from conference.models import ConferenceRegistration, ConferenceCode, AlumniConferenceCode, QuasiVIPCode, InvalidCode
 from conference.utils import needsToRenew
 from creditcard.models import CC_TYPES, Product
 from creditcard.forms import CreditCardNumberField, CreditCardExpiryField, PaymentFormPreview
@@ -109,6 +110,8 @@ class ConferenceRegistrationForm(forms.ModelForm):
         try:
             if (codestring == 'ewbalumni'):
                 code = AlumniConferenceCode()
+            elif (codestring == 'ewbconfspecial'):
+                code = QuasiVIPCode()
             else:
                 code = ConferenceCode.objects.get(code=codestring)
                 
@@ -159,7 +162,16 @@ class ConferenceRegistrationForm(forms.ModelForm):
         else:
             codename = "open"
         
-        sku = "confreg-2011-" + cleaned_data['type'] + "-" + codename 
+        sku = "confreg-2011-" + cleaned_data['type'] + "-" + codename
+        
+        if not CONF_OPTIONS.get(sku, None):
+            errormsg = "The registration code you've entered is not valid for the registration type you selected."
+            self._errors['type'] = self.error_class([errormsg])
+            self._errors['code'] = self.error_class([errormsg])
+            del cleaned_data['type']
+            del cleaned_data['code']
+            raise forms.ValidationError("Unable to complete registration (see errors below)")
+         
         cost = CONF_OPTIONS[sku]['cost']
         name = CONF_OPTIONS[sku]['name']
         product, created = Product.objects.get_or_create(sku=sku)
@@ -228,7 +240,7 @@ class ConferenceRegistrationForm(forms.ModelForm):
         if value.is_bulk:
             del(self.fields['prevConfs'])
             del(self.fields['prevRetreats'])
-            del(self.fields['code'])
+            #del(self.fields['code'])
             self.fields['type'].choices=EXTERNAL_CHOICES
         else:
             del(self.fields['grouping'])
@@ -285,6 +297,17 @@ class ConferenceRegistrationFormPreview(PaymentFormPreview):
             # and update their membership if they paid it
             if needsToRenew(request.user.get_profile()):
                 request.user.get_profile().pay_membership()
+                
+            # lastly, add them to the group
+            grp, created = Community.objects.get_or_create(slug='conference2011',
+                                                           defaults={'invite_only': True,
+                                                                     'name': 'National Conference 2011 delegates',
+                                                                     'creator': request.user,
+                                                                     'description': 'National Conference 2011 delegates',
+                                                                     'mailchimp_name': 'National Conference 2011',
+                                                                     'mailchimp_category': 'Conference'})
+            grp.add_member(request.user)
+            
             
             # don't do the standard render_to_response; instead, do a redirect
             # so that someone can't double-submit by hitting refresh

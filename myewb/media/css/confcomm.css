@@ -13,6 +13,47 @@ a:hover {
     color: #FF9743;
 }
 
+#nav a {
+color:#999;
+}
+
+.submenu {
+z-index:1000;  /* the profile image covers it up otherwise in firefox/mac */
+}
+
+
+
+p {
+
+padding:0;   /* @@@ this could break things; just resetting it so previous layout tweaks line up. */
+
+margin: 5px 0;
+
+}
+
+/* fixing things broken by that CSS in header1 */
+
+#nav p {
+padding: 0px;
+margin:0;
+color:#999999;
+
+font-size:10px;
+}
+
+
+#nav {
+font-weight:bold;
+text-align:right;
+}
+
+body {
+margin-top:0px;
+}
+
+
+
+
 #content {
 margin-left:0;
 
@@ -24,7 +65,14 @@ display:none;
 }
 
 #header_sp .textsub {
-display: none;
+/* display: none; */
+margin:0;
+}
+
+#header_sp .textsub h1 {
+font-family:"Lucida Grande",Geneva,Verdana,Arial,Helvetica,sans-serif;
+text-transform: none;
+font-weight: bold;
 }
 
 #loading-widget {
@@ -34,10 +82,24 @@ display: none;
     left: 500px;
 }
 
-h1, h2, h3, h4, h5, h6 {
+p.loading {
+background: no-repeat left center;
+
+padding:10px;
+padding-left: 40px;
+
+margin:10px auto;
+width:60px;  /* will this fit everywhere it's used??  @@@ */  /* also removed 40px because of existing 50px padding */
+}
+
+#all h1,#all h2, #all h3, #all h4, #all h5, #all h6 {
 font-family:"Lucida Grande",Geneva,Verdana,Arial,Helvetica,sans-serif;
 
+/* font-weight: bold; */
+
+
 }
+
 
 h2 {
   font-size: 20px;
@@ -54,6 +116,10 @@ img {
 }
 
 
+div.cleardiv {
+clear:both; height:1px;
+}
+
 /* removed from   single.html */
 
     .section {
@@ -62,7 +128,7 @@ img {
     }
     .sidebar-section {
         border: 1px solid black;
-        height: 180px;
+/*         height: 180px; */
         margin: 9px 4px;
     }
     .sidebar-section img {
@@ -109,10 +175,12 @@ img {
         display: inline;
         list-style-type: none;
         
+        margin:0;
+        
         /* todo - fix the paginator so the current page isn't as thin */
         
     }
-    ul.pagination li a, ul.pagination li.currentpage, div.pagination-prev-next a  {
+    div#all ul.pagination li a, div#all ul.pagination li.currentpage, div#all div.pagination-prev-next a  {
 
             padding:4px 6px;
 
@@ -135,34 +203,108 @@ img {
 
 
 
+/*  login form
+    needs to reset some crazy stuff from those original templates. yikes. :) 
+ */
+label {
+
+text-align: left;
+display:block;
+position:static;
+
+top:auto;
+width:inherit;
+font-size:14px;
+}
+
+.loginform label {
+margin-bottom: 3px;
+}
+.loginform label.leftalign {
+/* text-align: left; */
+}
+
+.loginform label input[type="text"], .loginform label input[type="password"] {
+padding:3px;
+width: 150px;
+margin:0;
+}
+
+.loginform span.left {
+width: 80px;
+display:block;
+float:left;
+
+padding:5px 5px;
+
+text-align:right;
+}
+.loginform span.rightlabel {
+padding:6px 3px;
+text-align: left;
+display: block;
+padding-left: 8px;
+float: left;
+}
+.loginform p.submitbutton {
+clear:both;
+}
+.loginform  input[type="submit"] {
+font-size:13px;
+}
+
+
+p.error-message {
+clear:both;
+}
+
+/* end of loginform */
+
+
+
+
+
 
 ul.pagination {
 
 background-color: #D7D8D9;
 
-            padding:4px;
+            padding:8px;
+            
+        margin:0;
+        
+        margin-bottom: 10px;
 
 }
 
 div.pagination-prev-next {
 float:right;
-            padding:4px;
+            padding:8px;  /* should be same as above */
 
 }
 
 
 
-h3 {
+#filters h3 {
 font-size:24px;
+margin-bottom:0.8em;
+margin-top:0.6em;
+
+font-weight:bold;
 }
 
 #all div, #all p {
 font-size:14px;
+
+
+
 }
 
 
 div#browser {
 margin-left: 0;
+
+clear:both;
 }
 
 
@@ -212,7 +354,7 @@ border:1px solid purple;
 
 
 a.profile-thumbnail-pic:hover {
-/* border:1px solid #eee; */
+border:1px solid #FF9743; 
 /* background-color: #eee; */
 
 /*
@@ -221,12 +363,19 @@ border-width: 2px;
 */
 }
 
-.un-registered img {
-    filter:alpha(opacity=30);
-    opacity: 0.3;
+span.yes-text {
+color: green;
 }
 
+.un-registered a.profile-thumbnail-pic img {
+    filter:alpha(opacity=50);
+    opacity: 0.5;
+}
 
+div.profile-summary.un-registered:hover a.profile-thumbnail-pic img {
+    filter:alpha(opacity=80);
+    opacity: 0.8;
+}
 
 p.profile-details {
 margin:0;
@@ -235,6 +384,11 @@ margin-top:5px;
 
 p.profile-details span {
 display: block;
+}
+
+
+p.profile-details span.yes-text {
+display: inline;
 }
 
 .profile-details-actions img {
@@ -291,18 +445,38 @@ div.profile-container {
 
 }
 
-.profile-container textarea {
-    width: 550px;
+.profile-container textarea,  textarea.invitation-input {
+    width: 540px;
+    
+    
+    padding:10px;
+    
+    font-family: Georgia, Times, serif;   /* @@@ yes/no? */
 }
 
-div.profile-container h2 {
+input.invitation-input {
+    width: 542px;
+    padding:6px;
+    font-size: 13px;
+}
+
+input.updater-button {
+font-size:13px;
+padding:4px;
+}
+
+div#facebox h2 {
 
 margin:0.1em 0 0.7em;
+
+
+font-family:"Lucida Grande",Geneva,Verdana,Arial,Helvetica,sans-serif;
+
 }
 
-div.profile-container-details p {
+div#facebox p {
 font-size: 14px;
-margin-bottom: 10px;
+margin: 10px 0;
 
 /* margin-left: 184px; */
 }
@@ -315,6 +489,7 @@ margin-bottom: 10px;
 ul.facebox-cohort-list {
     list-style-type: none;
     padding-left: 5px;
+    margin:0;
 }
 
 ul.facebox-cohort-list li {
@@ -347,8 +522,13 @@ font-size: 12px;
 letter-spacing: 0.2em;
 
 margin-bottom: 0.25em;
+padding-left: 230px;
 
 color: #333;
+}
+
+div.no-question-offset span.facebox-profile-question {
+padding-left: 0px;
 }
 
 span.facebox-profile-answer {
@@ -359,6 +539,7 @@ font-family: Georgia, Times, serif;
 font-size: 18px;
 
 line-height:1.25em;
+padding-left: 230px;
 
 }
 
@@ -410,9 +591,10 @@ span.filter-letter.selected {
 }
 
 /* cohort-name for search results */
-div.cohort-name {
+#all div.cohort-name {
     font-size: 1.5em;
     font-weight: bold;
+    margin-bottom: 0.5em;
 }
 
 /* cohort opt in and out styling */
@@ -425,7 +607,7 @@ div.cohort-name {
     border: 1px solid black;
     color: white;
     -moz-border-radius: 3px;
-    padding: 3px;
+    padding: 1px 3px;
     opacity: 0.5;
     filter:alpha(opacity=50);
 }
@@ -452,4 +634,47 @@ div.cohort-name {
 
 #browser-container .profile-details-cohort {
     margin: 6px 0px;
+}
+
+
+#filter-controls a.clearallfilters {
+float:right;
+}
+
+div.searchnameregistered {
+width: 290px;
+float:left
+}
+
+
+
+
+
+
+
+/* the "Your profile" box on the left */
+
+a.your-thumb-img img {
+padding:2px;
+border:1px solid #ccc;
+margin-right: 7px;
+}
+
+div#my-profile div.sidebar-section-contents { 
+/* margin-top: 0; */
+}
+
+div#my-profile h4 {
+margin:0;
+font-size:16px;
+clear:none;
+
+font-weight: bold;
+padding:0.4em 0;
+}
+
+p.profile-blurb {
+color:#555555;
+font-family:georgia, serif;
+font-style:italic;
 }
