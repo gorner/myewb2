@@ -1,8 +1,10 @@
 from django.conf.urls.defaults import *
 from django.core.urlresolvers import reverse
+from avatar.models import Avatar, avatar_file_path
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.contrib.sites.models import Site
 from emailconfirmation.models import EmailAddress
 from django.shortcuts import get_object_or_404
 from django.http import HttpResponse, HttpResponseForbidden
@@ -22,6 +24,8 @@ urlpatterns = patterns('siteutils.shortcuts',
     url(r'^hot/Any plus Replies$', 'redirect_to_reverse', {'url': 'topic_feed_featured',
                                     'permanent': True}),
     url(r'^list/(?P<group_slug>[-\w]+)$', 'redirect_to', {'url': '/feeds/posts/group/%(group_slug)s/',
+                                    'permanent': True}),
+    url(r'^list/(?P<group_slug>[-\w]+)/full$', 'redirect_to', {'url': '/feeds/posts/group/%(group_slug)s/',
                                     'permanent': True}),
     url(r'^calendar/(?P<group_slug>[-\w]+).ics$', 'redirect_to', {'url': '/events/ical/for/networks/network/slug/%(group_slug)s/',
                                     'permanent': True}),
@@ -56,7 +60,7 @@ def login(request, details=False):
                     response['email'] = user.email
                     response['firstname'] = user.first_name
                     response['lastname'] = user.last_name
-                    response['myewbprofilelink'] = user.get_profile().get_absolute_url()
+                    response['myewbprofilelink'] = "http://%s%s" % (Site.objects.get_current().domain, user.get_profile().get_absolute_url())
                     #response['myewbprofilephoto']
                     response['phonenumber'] = user.get_profile().default_phone().number
                     response['addresslineone'] = user.get_profile().default_address().street 
@@ -65,6 +69,14 @@ def login(request, details=False):
                     response['province'] = user.get_profile().default_address().province 
                     response['country'] = user.get_profile().default_address().country
                     response['preferredlanguage'] = user.get_profile().language 
+
+                    avatars = Avatar.objects.filter(user=user).order_by('-primary')
+                    if avatars.count() > 0:
+                        avatar = avatars[0]
+                        response['myewbprofilephoto'] = "http://%s%s" % (Site.objects.get_current().domain, avatar.avatar_url(200)) 
+                    
+                    if user.get_profile().get_chapter():
+                        response['chapter'] = user.get_profile().get_chapter().name
                     
                     return JsonResponse(response)
                 else:
@@ -85,8 +97,7 @@ def userdetails(request, userid, api_key):
     response['email'] = user.email
     response['firstname'] = user.first_name
     response['lastname'] = user.last_name
-    response['myewbprofilelink'] = user.get_profile().get_absolute_url()
-    #response['myewbprofilephoto']
+    response['myewbprofilelink'] = "http://%s%s" % (Site.objects.get_current().domain, user.get_profile().get_absolute_url())
     if user.get_profile().default_phone():
         response['phonenumber'] = user.get_profile().default_phone().number
     if user.get_profile().default_address():
@@ -96,6 +107,14 @@ def userdetails(request, userid, api_key):
         response['province'] = user.get_profile().default_address().province 
         response['country'] = user.get_profile().default_address().country
     response['preferredlanguage'] = user.get_profile().language 
+    
+    avatars = Avatar.objects.filter(user=user).order_by('-primary')
+    if avatars.count() > 0:
+        avatar = avatars[0]
+        response['myewbprofilephoto'] = "http://%s%s" % (Site.objects.get_current().domain, avatar.avatar_url(200)) 
+
+    if user.get_profile().get_chapter():
+        response['chapter'] = user.get_profile().get_chapter().name
     
     return JsonResponse(response)
     

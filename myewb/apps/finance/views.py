@@ -18,6 +18,7 @@ from pygooglechart import SimpleLineChart, Axis, PieChart3D, PieChart2D, Stacked
 #import your needed models here
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
+from base_groups.models import BaseGroup
 from base_groups.decorators import group_admin_required
 from networks.decorators import chapter_president_required
 from networks.models import Network
@@ -157,7 +158,7 @@ def create_donation(request, group_slug):
         else:
             form = DonationForm(request.POST, request.FILES) # A form bound to the POST data
         
-        donation_category = Category.objects.get(name="donation")
+        donation_category = Category.objects.get(name="Donation")
         #validate fields
         if form.is_valid(): # check if fields validated
                 cleaned_data = form.cleaned_data
@@ -415,7 +416,7 @@ def summary(request, group_slug, year=None, month=None):
     
     template_data['group'] = group
     template_data['is_group_admin'] = group.user_is_admin(request.user)
-    template_data['is_president'] = group.user_is_president(request.user)
+#    template_data['is_president'] = group.user_is_president(request.user)
     
     return render_to_response('finance/summary.htm', template_data, context_instance=RequestContext(request))
 
@@ -591,7 +592,7 @@ def view(request, group_slug, year=None, month=None):
     
     template_data['group'] = group
     template_data['is_group_admin'] = group.user_is_admin(request.user)
-    template_data['is_president'] = group.user_is_president(request.user)
+#    template_data['is_president'] = group.user_is_president(request.user)
     
     return render_to_response('finance/view.htm', template_data, context_instance=RequestContext(request))
 
@@ -622,7 +623,7 @@ def view_donations(request, group_slug, year=None, month=None):
     
     template_data['group'] = group
     template_data['is_group_admin'] = group.user_is_admin(request.user)
-    template_data['is_president'] = group.user_is_president(request.user)
+#    template_data['is_president'] = group.user_is_president(request.user)
     
     return render_to_response('finance/view_donation.htm', template_data, context_instance=RequestContext(request))
 
@@ -645,7 +646,7 @@ def view_commitments(request, group_slug):
     
     template_data['group'] = group
     template_data['is_group_admin'] = group.user_is_admin(request.user)
-    template_data['is_president'] = group.user_is_president(request.user)
+#    template_data['is_president'] = group.user_is_president(request.user)
     
     return render_to_response('finance/view_commitment.htm', template_data, context_instance=RequestContext(request))
 
@@ -660,7 +661,7 @@ def view_id(request, group_slug, id):
     template_data = dict()
     
     transaction = trans_chap.get(pk=id)
-    if transaction.category.name == "donation":
+    if transaction.category.name == "Donation":
         transaction = donations_chap.get(pk=id)
     elif transaction.type == "EX":
         transaction = expenditure_chap.get(pk=id)
@@ -785,7 +786,7 @@ def edit_id(request, id, group_slug):
     if t.type == "IN":
         t = get_object_or_404(Income, pk=id)
         if request.method == 'POST': # If the form has been submitted...       
-            if t.category.name == "donation":
+            if t.category.slug == "donation":
                 t = get_object_or_404(Donation, pk=id)
 #                if the user is staff, they should always be able to change all fields
                 if user.is_staff:
@@ -816,7 +817,7 @@ def edit_id(request, id, group_slug):
         
                 return HttpResponseRedirect(reverse('view', kwargs={'group_slug': group.slug}) ) # Redirect after POST
         else:
-            if t.category.name == "donation":
+            if t.category.slug == "donation":
                 t = get_object_or_404(Donation, pk=id)
                 if user.is_staff:
                     form = DonationStaffForm(instance=t)
@@ -919,13 +920,20 @@ def delete_id(request, id, group_slug):
     t = trans_chap.get(pk=id)
     permission = False
     delete = False
+    
+#    if user is staff, then can delete anything
+    if request.user.is_staff:
+        t.delete()
+        permission = True
+        delete = True
 #    make sure they have permission to delete (submitted, chapter)
-    if t.account == "CH":
-        if t.submitted == "N":
-            if t.group.slug == group.slug:
-                t.delete()
-                permission = True
-                delete = True
+    else:
+        if t.account == "CH":
+            if t.submitted == "N":
+                if t.group.slug == group.slug:
+                    t.delete()
+                    permission = True
+                    delete = True
                 
                 
     template_data["confirm"] = False
@@ -953,10 +961,14 @@ def confirm_delete_id(request, id, group_slug):
     permission = False
 
 #    make sure they have permission to delete (submitted, chapter)
-    if t.account == "CH":
-        if t.submitted == "N":
-            if t.group.slug == group.slug:
-                permission = True
+    if request.user.is_staff:
+            permission = True 
+    else:
+        if t.account == "CH":
+            if t.submitted == "N":
+                if t.group.slug == group.slug:
+                    permission = True
+
                 
     template_data["confirm"] = True
     template_data["trans"] = t
@@ -1034,19 +1046,21 @@ def monthlyreports_dashboard(request, year=None, month=None):
 #    make table of all networks and their submitted/not submitted monthly reports
     for n in networks:
         count = count + 1
-        mr = mr_chap.filter(group = n.id, date__year = year, date__month = month)
+        
         table.append([])
         table[count].append(n)
+        
+#        attach chapter monthly report
+        mr = mr_chap.filter(group = n.id, date__year = year, date__month = month).order_by('-enter_date')
         if mr:
-            for m in mr:
-                table[count].append(m)
+            table[count].append(mr[0])
         else:
             table[count].append("")
         
-        mr = mr_no.filter(group = n.id, date__year = year, date__month = month)    
+#        attach no monthly report
+        mr = mr_no.filter(group = n.id, date__year = year, date__month = month).order_by('-enter_date') 
         if mr:
-            for m in mr:
-                table[count].append(m)
+            table[count].append(mr[0])
         else:
             table[count].append("")
         
@@ -1263,6 +1277,28 @@ def monthlyreports_current(request, group_slug):
     return render_to_response('finance/monthlyreports_detail.htm', template_data, context_instance=RequestContext(request))
 
 @group_admin_required()
+def monthlyreports_submit_confirm(request, group_slug, year=None, month=None):
+    template_data = dict()
+    
+    template_data['empty'] = False
+    if year:
+        if month:
+            template_data['year'] = year
+            template_data['month'] = month
+            template_data['empty'] = True
+        else:
+ #            error since not month AND year
+            return HttpResponseForbidden()
+        
+    group = get_object_or_404(Network, slug=group_slug)
+    
+    template_data['group'] = group
+    template_data['is_group_admin'] = group.user_is_admin(request.user)
+    template_data['is_president'] = group.user_is_president(request.user)
+    
+    return render_to_response('finance/monthlyreports_submit_confirm.htm', template_data, context_instance=RequestContext(request))
+
+@group_admin_required()
 def monthlyreports_submit(request, group_slug, year=None, month=None):
 #======================================================
 #submit the most recent report
@@ -1270,7 +1306,9 @@ def monthlyreports_submit(request, group_slug, year=None, month=None):
     #    get chapter
     group = get_object_or_404(Network, slug=group_slug)
     trans_chap, income_chap, donations_chap, expenditure_chap, monthly_chap = create_chapter_filters(group_slug)
-    template_data = dict()  
+    template_data = dict()
+    
+#    this is for blank reports that are submitted (the right year and date is passed in)  
     if year:
         if month:
             if (int(year)*100 + int(month)) < (datetime.datetime.now().year*100 + datetime.datetime.now().month):
@@ -1282,12 +1320,11 @@ def monthlyreports_submit(request, group_slug, year=None, month=None):
                 monthly_report.creator = request.user
                 monthly_report.save()
                 template_data['submitted'] = True
-                template_data['message'] = "in month, year  submitted"
             else:
                 template_data['submitted'] = False
 
         else:
-#            error since not month AND date
+#            error since not month AND year
             return HttpResponseForbidden()
             
     else:
@@ -1298,6 +1335,12 @@ def monthlyreports_submit(request, group_slug, year=None, month=None):
     #    TODO: how to edit submitted transactions... NO only?
         if (min_date.year*100 + min_date.month) < (datetime.datetime.now().year*100 + datetime.datetime.now().month):
             transactions = trans.filter(bank_date__year = min_date.year, bank_date__month = min_date.month)    
+            
+            mr_check = monthly_chap.filter(date__year = min_date.year, date__month = min_date.month, type = "CH")
+            
+            if mr_check:
+                template_data['group'] = group
+                return render_to_response('finance/monthlyreports_submit_error.htm', template_data, context_instance=RequestContext(request))
             
             monthly_report = MonthlyReport()
             monthly_report.date=datetime.datetime(min_date.year,min_date.month, 1)
@@ -1316,10 +1359,8 @@ def monthlyreports_submit(request, group_slug, year=None, month=None):
                 t.save()
             
             template_data['submitted'] = True
-            template_data['message'] = "submitted"
         else:
             template_data['submitted'] = False
-            template_data['message'] = "not submitted"
     
     template_data['group'] = group
     template_data['is_group_admin'] = group.user_is_admin(request.user)
@@ -1499,11 +1540,11 @@ def csv_donationreport(request, group_slug=None):
     row = ["Donation Report"]
     writer.writerow([fix_encoding(s) for s in row])
 #    TODO: make this actually look like the report
-    row = ["Account", "Type", "Bank Date", "Cheque Date", "Cheque Number", "Tax Receipt Required?", "Category", "Donor", "Address", "City", "Province", "Country", "Postal Code" "Description", "Amount"]
+    row = ["Account", "Type", "Bank Date", "Cheque Date", "Cheque Number", "Tax Receipt Required?", "Category", "Donor", "Address", "City", "Province", "Country", "Postal Code", "Description", "Amount"]
     writer.writerow([fix_encoding(s) for s in row])
     
     for t in donations:
-        row = [t.account, t.type, t.bank_date, t.cheque_date, t.cheque_num, t.taxreceipt, t.donation_category, t.donor, t.address, t.city, t.province, t.country, t.postalcode, t.description, t.amount]
+        row = [t.account, t.type, t.bank_date, t.cheque_date, t.cheque_num, t.taxreceipt, t.donation_category, t.donor, t.address, t.city, t.province, t.country, t.postal, t.description, t.amount]
         writer.writerow([fix_encoding(s) for s in row])
     
     return response
@@ -1514,9 +1555,9 @@ def csv_accountingreport(request):
 # accounting report
 #======================================================
 
-    income = Income.objects.filter(account="CH").exclude(category="donation").order_by('group')
-    donation = Donation.objects.filter(account="CH").order_by('group')
-    expenditure = Expenditure.objects.filter(account="CH").order_by('group')
+    income = Income.objects.filter(account="CH", bank_date__isnull=False).exclude(category="Donation").order_by('group')
+    donation = Donation.objects.filter(account="CH", bank_date__isnull=False).order_by('group')
+    expenditure = Expenditure.objects.filter(account="CH", bank_date__isnull=False).order_by('group')
     
     response = HttpResponse(mimetype='text/csv')
     response['Content-Disposition'] = 'attachment; filename=accounting_report.csv'
@@ -1541,47 +1582,109 @@ def csv_accountingreport(request):
     return response
 
 @staff_member_required
-def upload_commitments(request, group_slug):
+def noview_commitments(request):
+    template_data = dict()
+    
+#    income information
+    commitments = Expenditure.objects.filter(type = 'CM')
+    total_cm = commitments.aggregate(total=Sum('amount'))
+
+#    if either of the totals is None, switch to 0    
+    if not total_cm["total"]: 
+        total_cm["total"] = 0
+
+#    information to pass to template
+    template_data["commitments"] = commitments
+    template_data["total_cm"] = total_cm
+
+    return render_to_response('finance/view_commitment.htm', template_data, context_instance=RequestContext(request))
+
+@staff_member_required
+def upload_commitments(request):
 #======================================================
 # upload commitments file
 #======================================================
-    #    get chapter
-    group = get_object_or_404(Network, slug=group_slug)
-    
+
     template_data = dict()
-    
+
     if request.method == 'POST':
-        form = UploadCommitmentForm(request.POST)
+        form = UploadCommitmentForm(request.POST, request.FILES)
         if form.is_valid(): 
-            directory = request.POST["dir"]    
-            reader = csv.reader(open(directory,"rb"))
+#            create_noreports(request)
+#            directory for file
+#            directory = request.POST["dir"]
+
+            # open file
+            diskfile = tempfile.TemporaryFile(mode='w+')
+            uploadedfile = request.FILES['dir']
+            # write file to disk
+            for chunk in uploadedfile.chunks():
+                diskfile.write(chunk)
+
+#            list of all the inputted transactions
+            transactions = []
+            errors = []
+#            open reader to read csv file
+#            reader = csv.reader(open(directory,"rb"))
+            diskfile.seek(0)
+            reader = csv.reader(diskfile)
+
+            rownumber = 0
             for r in reader:
-                print r[0]
+                rownumber = rownumber + 1
+                print "row was read"
+#                determine what type of transaction
                 if r[0] == "CM":
-                    commitment = Expenditure()
-                    commitment.type = "CM"
-                    commitment.chapter = r[1]
-                    commitment.bank_date = r[2]
-                    commitment.category = r[3]
-                    commitment.description = r[4]
-                    commitment.amount = r[5]
-                    commitment.account = "NO"
-                    commitment.payee = "National Office"
-                    commitment.submitted = "N"
-                    commitment.account = "NO"
-                    commitment.save()
-                    print "saved"
-#            return HttpResponseRedirect('upload_file')
+                    try:
+                        
+                        c = Category.objects.get(id=r[3])
+                        g = BaseGroup.objects.get(id=r[10])
+                        
+                        exp = Expenditure()
+                        exp.type = "CM"
+                        exp.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
+                        exp.amount = r[2]
+#                        this is sketchy - should get the actual category
+                        exp.category = c
+                        exp.description = r[4]
+                        exp.payee = r[5]
+                        if r[8]:
+                            exp.cheque_num = r[8]
+                        if r[9]:
+                            exp.cheque_date = r[9]
+                        exp.group = g
+                        exp.account = "NO"
+                        exp.payee = "National Office"
+                        exp.submitted = "N"
+                        exp.account = "NO"
+                        
+                        exp.creator = request.user
+                        exp.editor = request.user
+                        transactions.append(exp)
+                    
+                        
+                    except Category.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), category does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), group does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + ")")
+            
+            if errors:
+                for e in errors:
+                 request.user.message_set.create(message="Error: " + e)
+            else:
+                for t in transactions:
+                    t.save()
+                    
+            return HttpResponseRedirect(reverse('noview_commitments'))
     else:
         form = UploadCommitmentForm()
     
-    template_data['group'] = group
-    template_data['is_group_admin'] = group.user_is_admin(request.user)
-    template_data['is_president'] = group.user_is_president(request.user)
     template_data['form'] = form
     template_data['type'] = "commitments"
     
-    return render_to_response('finance/import.htm', template_data)
+    return render_to_response('finance/import_commitments.htm', template_data, context_instance=RequestContext(request))
 
 @staff_member_required
 def upload_testdata(request, group_slug):
@@ -1710,78 +1813,119 @@ def upload_noreport(request):
                 diskfile.write(chunk)
 
 #            list of all the inputted transactions
-            transactions = []    
+            transactions = []
+            errors = []
 #            open reader to read csv file
 #            reader = csv.reader(open(directory,"rb"))
             diskfile.seek(0)
             reader = csv.reader(diskfile)
 
+            rownumber = 0
             for r in reader:
+                rownumber = rownumber + 1
                 print "row was read"
 #                determine what type of transaction
                 if r[0] == "EX":
-                    exp = Expenditure()
-                    exp.type = "EX"
-                    exp.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
-                    exp.amount = r[2]
-#                    this is sketchy - should get the actual category
-                    exp.category_id = r[3]
-                    exp.description = r[4]
-                    exp.payee = r[5]
-                    if r[8]:
-                        exp.cheque_num = r[8]
-                    if r[9]:
-                        exp.cheque_date = r[9]
-                    exp.group_id = r[10]
-                    exp.account = "NO"
-                    exp.submitted = "N"
-                    exp.creator = request.user
-                    exp.editor = request.user
-                    exp.save()
-                    transactions.append(exp)
-                    submit_notransaction(exp)
+                    try:
+                        c = Category.objects.get(id=r[3])
+                        g = BaseGroup.objects.get(id=r[10])
+
+                        exp = Expenditure()
+                        exp.type = "EX"
+                        exp.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
+                        exp.amount = r[2]
+#                        this is sketchy - should get the actual category
+                        exp.category = c
+                        exp.description = r[4]
+                        exp.payee = r[5]
+                        if r[8]:
+                            exp.cheque_num = r[8]
+                        if r[9]:
+                            exp.cheque_date = r[9]
+                        exp.group = g
+                        exp.account = "NO"
+                        exp.submitted = "N"
+                        exp.creator = request.user
+                        exp.editor = request.user
+                        #exp.save()
+                        transactions.append(exp)
+                        #submit_notransaction(exp)
+                    except Category.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), category does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), group does not exist")
+                    except:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + ")")
+                
                 elif r[0] == "IN":
-                    income = Income()
-                    income.type = "IN"
-                    income.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
-                    income.amount = r[2]
-#                    this is sketchy - should get the actual category
-                    income.category_id = r[3]
-                    income.description = r[4]
-                    income.group_id = r[10]
-                    income.account = "NO"
-                    income.submitted = "N"
-                    income.creator = request.user
-                    income.editor = request.user
-                    income.save()
-                    transactions.append(income)
-                    current = income
-                    submit_notransaction(income)
+                    try:
+                        c = Category.objects.get(id=r[3])
+                        g = BaseGroup.objects.get(id=r[10])
+
+                        income = Income()
+                        income.type = "IN"
+                        income.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
+                        income.amount = r[2]
+#                        this is sketchy - should get the actual category
+                        income.category = c
+                        income.description = r[4]
+                        income.group = g
+                        income.account = "NO"
+                        income.submitted = "N"
+                        income.creator = request.user
+                        income.editor = request.user
+                        #income.save()
+                        transactions.append(income)
+                        #current = income
+                        #submit_notransaction(income)
+                    except Category.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), category does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), group does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + ")")
                 elif r[0] == "DN":
-                    donation = Donation()
-                    donation.type = "IN"
-                    donation.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
-                    donation.amount = r[2]
-#                    this is sketchy - should get the actual category
-                    donation.category_id = r[3]
-                    donation.description = r[4]
-                    donation.donor = r[5]
-                    donation.donation_category = r[6]
-                    donation.address = r[7]
-                    if r[8]:
-                        exp.cheque_num = r[8]
-                    if r[9]:
-                        exp.cheque_date = r[9]
-                    donation.group_id = r[10]
-                    donation.account = "NO"
-                    donation.submitted = "N"
-                    donation.creator = request.user
-                    donation.editor = request.user
-                    donation.save()
-                    transactions.append(donation)
-                    current = donation
-                    submit_notransaction(donation)
-            
+                    try:
+                        c = Category.objects.get(id=r[3])
+                        g = BaseGroup.objects.get(id=r[10])
+
+                        donation = Donation()
+                        donation.type = "IN"
+                        donation.bank_date = datetime.date(year=int(r[11]), month=int(r[12]), day=int(r[13]))
+                        donation.amount = r[2]
+#                        this is sketchy - should get the actual category
+                        donation.category = c
+                        donation.description = r[4]
+                        donation.donor = r[5]
+                        donation.donation_category = r[6]
+                        donation.address = r[7]
+                        if r[8]:
+                            exp.cheque_num = r[8]
+                        if r[9]:
+                            exp.cheque_date = r[9]
+                        donation.group = g
+                        donation.account = "NO"
+                        donation.submitted = "N"
+                        donation.creator = request.user
+                        donation.editor = request.user
+                        #donation.save()
+                        transactions.append(donation)
+                        #current = donation
+                        #submit_notransaction(donation)
+                    except Category.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), category does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + "), group does not exist")
+                    except BaseGroup.DoesNotExist:
+                        errors.append("Error with row " + str(rownumber) + " (" + r[4] + ")")
+
+            if errors:
+                for e in errors:
+                 request.user.message_set.create(message="Error: " + e)
+            else:
+                for t in transactions:
+                    t.save()
+                    submit_notransaction(t)
             return HttpResponseRedirect(reverse('view_allnoreports'))
     else:
         form = UploadCommitmentForm()

@@ -7,6 +7,7 @@ Created on: 2009-10-18
 @author: Francis Kung
 """
 
+from django.contrib import auth
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
@@ -18,19 +19,56 @@ from django.template import RequestContext
 from django.contrib.contenttypes.models import ContentType
 from attachments.models import Attachment
 
+from account_extra.forms import EmailLoginForm, EmailSignupForm
+
 from base_groups.models import BaseGroup
-from conference.forms import ConferenceRegistrationForm, ConferenceRegistrationFormPreview, CodeGenerationForm
+from conference.forms import ConferenceRegistrationForm, ConferenceRegistrationFormPreview, CodeGenerationForm, ConferenceSignupForm
 from conference.models import ConferenceRegistration, ConferenceCode
 from conference.constants import *
 from conference.utils import needsToRenew
 from networks.models import ChapterInfo
 from profiles.models import MemberProfile
+from profiles.forms import AddressForm
 from siteutils.shortcuts import get_object_or_none
 from siteutils.decorators import owner_required, secure_required
 
 @secure_required
-@login_required
+def login(request):
+    
+    signin_form = EmailLoginForm()
+    signup_form = ConferenceSignupForm()
+    
+    if request.method == "POST" and request.POST.get('action', None):
+        if request.POST['action'] == 'signin':
+            signin_form = EmailLoginForm(request.POST)
+            if signin_form.is_valid():
+                user = signin_form.user
+                user.is_bulk = False
+                user.save()
+                auth.login(request, user)
+                return HttpResponseRedirect(reverse('confreg'))
+        else:
+            signup_form = ConferenceSignupForm(request.POST)
+            
+            if signup_form.is_valid():
+                username, password = signup_form.save()
+                user = auth.authenticate(username=username, password=password)
+                auth.login(request, user)
+                
+                return HttpResponseRedirect(reverse('confreg'))
+        
+    return render_to_response('conference/login.html',
+                              {"signin_form": signin_form,
+                               "signup_form": signup_form},
+                              context_instance = RequestContext(request))
+
+@secure_required
+#@login_required
 def view_registration(request):
+    
+    if not request.user.is_authenticated():
+        return HttpResponseRedirect(reverse('conference_login'))
+    
     user = request.user
     
     try:
@@ -38,6 +76,8 @@ def view_registration(request):
         # cancellation or a receipt
         registration = ConferenceRegistration.objects.get(user=user, cancelled=False)
         form = None
+
+        return HttpResponseRedirect(reverse('confcomm_app'))
 
     except ObjectDoesNotExist:
         # if not registered, we display the registration form
@@ -132,17 +172,16 @@ def cancel(request):
         send_mail('Confreg cancelled', body, 'mailer@my.ewb.ca',
                   ['monitoring@ewb.ca'], fail_silently=False)
 
-        # tell the user and redirect them back out
-        request.user.message_set.create(message="Your registration has been cancelled.")
-        
-        return HttpResponseRedirect(reverse('confreg'))
-
+        cancelled = True
     else:
-        # this template will show a confirm page.
-        return render_to_response('conference/cancel.html',
-                                  {'reg': registration},
-                                   context_instance=RequestContext(request)
-                                   )
+        cancelled = False
+        
+    # this template will show a confirm page.
+    return render_to_response('conference/cancel.html',
+                              {'reg': registration,
+                               'cancelled': cancelled},
+                               context_instance=RequestContext(request)
+                               )
     
 @login_required
 def list(request, chapter=None):
@@ -154,8 +193,8 @@ def list(request, chapter=None):
         
         if not request.user.has_module_perms('conference'):
             # non-admins: only see chapters you're an exec of
-            chapters.filter(network__members__user=request.user,
-                            network__members__isAdmin=True)
+            chapters = chapters.filter(network__members__user=request.user,
+                                       network__members__is_admin=True)
 
         # if only one chapter, display it right away
         if chapters.count() == 1:
@@ -164,7 +203,7 @@ def list(request, chapter=None):
         else:
             # otherwise, show a summary page
             for chapter in chapters:
-                registrations = ConferenceRegistration.objects.filter(user__member_groups__group=chapter,
+                registrations = ConferenceRegistration.objects.filter(user__memberprofile__chapter=chapter.network,
                                                                       cancelled=False)
                 chapter.numRegistrations = registrations.count()
             
@@ -181,7 +220,7 @@ def list(request, chapter=None):
     if not group.user_is_admin(request.user) and not request.user.has_module_perms('conference'):
         return render_to_response('denied.html', context_instance=RequestContext(request))
         
-    registrations = ConferenceRegistration.objects.filter(user__member_groups__group=group,
+    registrations = ConferenceRegistration.objects.filter(user__memberprofile__chapter=group,
                                                           cancelled=False)
 
     return render_to_response('conference/list.html',
@@ -211,6 +250,7 @@ def generate_codes(request):
                     code, created = ConferenceCode.objects.get_or_create(type=type, number=i, code=code.code)
 
                     if request.POST.get('action', None) == "void":
+                        
                         code.expired = True
                         code.save()
                         codes.append("voided - " + code.code)

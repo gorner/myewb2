@@ -59,7 +59,8 @@ class Session(models.Model):
     emails = []
     for app in self.complete_applications():
         emails.append(app.profile.user2.email)
-        eval = app.evaluation
+        eval, created = Evaluation.objects.get_or_create(application=app)
+        #eval = app.evaluation
         eval.last_email = datetime.now()
         eval.save()
     
@@ -166,6 +167,38 @@ class Application(models.Model):
     for a in answers:
         answer_list[a.question.id] = a.answer
     return answer_list
+    
+  def completion(self):
+    if self.complete:
+      return 100
+    
+    questions = 10      # language, resume, etc
+    questions = questions + self.session.application_questions().count()
+    
+    completed = self.answer_set.count()
+    if self.en_writing:
+      completed = completed + 1;
+    if self.en_reading:
+      completed = completed + 1;
+    if self.en_speaking:
+      completed = completed + 1;
+    if self.fr_writing:
+      completed = completed + 1;
+    if self.fr_reading:
+      completed = completed + 1;
+    if self.fr_speaking:
+      completed = completed + 1;
+    if self.schooling:
+      completed = completed + 1;
+    if self.resume_text:
+      completed = completed + 1;
+    if self.references:
+      completed = completed + 1;
+    if self.gpa:
+      completed = completed + 1;
+
+    return float(completed) / float(questions) * 100    
+    
     
 class Answer(models.Model):
   answer = models.TextField()

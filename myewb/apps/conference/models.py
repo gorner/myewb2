@@ -5,6 +5,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
 
+from communities.models import Community
 from conference.constants import *
 from networks.models import Network, ChapterInfo
 from siteutils.models import Address
@@ -27,16 +28,33 @@ class ConferenceRegistration(models.Model):
     prevConfs = models.SmallIntegerField()
     prevRetreats = models.SmallIntegerField()
     cellphone = models.CharField(max_length=50, blank=True, null=True)
+    grouping = models.CharField(max_length=50, blank=True, null=True)
     
     txid = models.CharField(max_length=255)
     receiptNum = models.CharField(max_length=255)
     code = models.ForeignKey('ConferenceCode', related_name="registration", blank=True, null=True)
     type = models.CharField(max_length=50)
-    africaFund = models.BooleanField()
+    africaFund = models.SmallIntegerField(blank=True, null=True)
 
     def cancel(self):
         self.cancelled = True
         self.chapter = None
+        self.save()
+
+        # remove from delegates group
+        grp, created = Community.objects.get_or_create(slug='conference2011',
+                                                       defaults={'invite_only': True,
+                                                                 'name': 'National Conference 2011 delegates',
+                                                                 'creator': self.user,
+                                                                 'description': 'National Conference 2011 delegates',
+                                                                 'mailchimp_name': 'National Conference 2011',
+                                                                 'mailchimp_category': 'Conference'})
+        grp.remove_member(self.user)
+        
+        # re-enable code
+        if self.code and self.code.expired:
+            self.code.expired = False
+            self.code.save()
         
     def getRefundAmount(self):
         return self.amountPaid - 20
@@ -84,7 +102,7 @@ class ConferenceCode(models.Model):
         # the type field above... so we hack it here to make it act like a
         # dictionary
         for code in CONF_CODES:
-            if code[0] == self.type:
+            if code[0] == self.type.lower():
                 return code[1]
         
         # should never get here, since the type field is restricted to CONF_CODES
@@ -112,3 +130,17 @@ class ConferenceCode(models.Model):
         m = hashlib.md5()
         m.update("%s%s%s" % (type, number, CONF_HASH))
         return codehash == m.hexdigest()[:4]
+
+class AlumniConferenceCode(ConferenceCode):
+    def getShortname(self):
+        return 'alumni'
+    
+    def isAvailable(self):
+        return True
+    
+class QuasiVIPCode(ConferenceCode):
+    def getShortname(self):
+        return 'discounted'
+    
+    def isAvailable(self):
+        return True
